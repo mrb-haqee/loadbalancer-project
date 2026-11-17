@@ -1,0 +1,65 @@
+name: lb-demo
+
+# Semua backend memakai label yang sama: satu Traefik service ("demo")
+# berisi 3 server → Traefik yang membagi request (weighted round robin).
+x-backend-labels: &backend-labels
+  traefik.enable: "true"
+  traefik.http.routers.demo.entrypoints: "web"
+  traefik.http.routers.demo.rule: "PathPrefix(`/`)"
+  traefik.http.routers.demo.middlewares: "demo-retry"
+  traefik.http.services.demo.loadbalancer.server.port: "3000"
+  # Health check aktif ala Traefik, di samping HEALTHCHECK milik Docker.
+  traefik.http.services.demo.loadbalancer.healthcheck.path: "/health"
+  traefik.http.services.demo.loadbalancer.healthcheck.interval: "2s"
+  traefik.http.services.demo.loadbalancer.healthcheck.timeout: "1s"
+  # Failover pasif: ulangi request bila server tidak menjawab (mis. container mati).
+  traefik.http.middlewares.demo-retry.retry.attempts: "3"
+  traefik.http.middlewares.demo-retry.retry.initialinterval: "100ms"
+
+x-backend-common: &backend-common
+  image: lb-demo-backend:latest
+  networks:
+    - lb-net
+  labels: *backend-labels
+  restart: unless-stopped
+
+services:
+  # Hanya service ini yang mem-build image; backend-2/3 memakai image yang sama.
+  backend-1:
+    <<: *backend-common
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      BACKEND_ID: backend-1
+
+  backend-2:
+    <<: *backend-common
+    environment:
+      BACKEND_ID: backend-2
+
+  backend-3:
+    <<: *backend-common
+    environment:
+      BACKEND_ID: backend-3
+
+  traefik:
+    image: traefik:latest
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "8088:80"    # trafik aplikasi
+      - "8089:8080"  # dashboard + API Traefik
+    volumes:
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - lb-net
+    restart: unless-stopped
+
+# Network terisolasi: tidak menyentuh network project lain
+# (proxy, sanmedclinic_internal, shared-api, dll).
+networks:
+  lb-net:
+    name: lb-net
+    driver: bridge

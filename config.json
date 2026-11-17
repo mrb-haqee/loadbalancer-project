@@ -1,0 +1,19 @@
+{
+  "loadBalancer": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "algorithm": "round-robin",
+    "healthCheck": {
+      "path": "/health",
+      "intervalMs": 2000,
+      "timeoutMs": 1000,
+      "failureThreshold": 1,
+      "successThreshold": 1
+    }
+  },
+  "backends": [
+    { "id": "server-1", "host": "127.0.0.1", "port": 3001 },
+    { "id": "server-2", "host": "127.0.0.1", "port": 3002 },
+    { "id": "server-3", "host": "127.0.0.1", "port": 3003 }
+  ]
+}
