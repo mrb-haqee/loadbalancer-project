@@ -1,6 +1,6 @@
 # 0001 — Load balancer ditulis sendiri di Node.js, bukan Nginx atau Docker
 
-- **Status:** Diterima — berlaku untuk **varian Node**. Varian container dijelaskan di [ADR 0003](0003-traefik-container-variant.md).
+- **Status:** **Digantikan (superseded)** oleh [ADR 0003](0003-traefik-container-variant.md). Kode varian Node (`src/load-balancer`, dashboard, 5 test Node, `scripts/run-all.js`, `scripts/request.js`) dan semua script `npm start` telah **dihapus** pada 17 November 2026; project sekarang hanya berisi varian container. Dokumen ini disimpan sebagai catatan sejarah keputusan.
 - **Tanggal:** 17 November 2026
 
 ## Konteks

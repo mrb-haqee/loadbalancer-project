@@ -1,6 +1,6 @@
 # 0002 — Failover pasif dengan retry, dan konsekuensinya: response di-buffer
 
-- **Status:** Diterima
+- **Status:** **Digantikan (superseded)** oleh [ADR 0003](0003-traefik-container-variant.md). Implementasi buffering + retry milik varian Node sudah dihapus; prinsipnya tetap berlaku dan sekarang dijalankan oleh middleware `retry` Traefik. Dokumen ini disimpan sebagai catatan sejarah keputusan.
 - **Tanggal:** 17 November 2026
 
 ## Konteks

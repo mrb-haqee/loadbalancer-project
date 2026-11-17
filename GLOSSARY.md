@@ -4,7 +4,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Load Balancer (LB)** — Pintu masuk tunggal yang membagi request klien ke beberapa Backend. Klien tidak pernah memilih Backend sendiri.
 
-**Backend** — Satu instance aplikasi yang melayani request. Di project ini ada tiga Backend, masing-masing satu proses Node.js dengan identitas sendiri (`server-1`, `server-2`, `server-3`).
+**Backend** — Satu instance aplikasi yang melayani request. Di project ini ada tiga Backend, masing-masing satu container dengan identitas sendiri (`server-1`, `server-2`, `server-3`).
 
 **Server (dalam konteks project ini)** — Sinonim Backend. Bukan mesin fisik terpisah.
 
@@ -20,12 +20,6 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Round Robin** — Algoritma yang memberi request bergiliran ke tiap Backend sehat secara berurutan.
 
-**Least Connections** — Algoritma yang memilih Backend dengan jumlah koneksi aktif paling sedikit.
-
-**Koneksi aktif** — Request yang sudah dikirim ke sebuah Backend tetapi responsnya belum selesai dikirim balik ke klien.
-
-**Tie-break round robin** — Aturan penentu ketika beberapa Backend punya jumlah koneksi aktif yang sama: pilihannya diputar bergiliran, bukan selalu yang pertama.
-
 **Failover Pasif** — Perpindahan yang dipicu oleh kegagalan nyata pada saat meneruskan request: request yang gagal dicoba ulang ke Backend lain.
 
 **Failover Aktif** — Perpindahan yang dipicu oleh hasil Health Check Aktif, sebelum ada request klien yang terkena dampak.
@@ -36,11 +30,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Pulih (recovery)** — Kembalinya sebuah Backend mati ke status sehat sehingga masuk rotasi lagi, tanpa perlu me-restart Load Balancer.
 
-## Istilah varian container
-
-**Varian Node** — Load balancer yang ditulis sendiri di Node.js (`src/load-balancer`), status backend dan statistiknya dipegang kode sendiri.
-
-**Varian Container** — Load balancer Traefik yang berjalan sebagai container, menemukan Backend lewat label Docker.
+## Istilah Traefik & Docker
 
 **Provider Docker** — Sumber konfigurasi Traefik yang membaca label container dan otomatis memperbarui rotasi saat container muncul, sehat, atau hilang.
 
@@ -60,7 +50,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Status UP/DOWN** — Hasil health check Traefik terhadap sebuah Server; Server `DOWN` tidak lagi menerima request.
 
-**Middleware Retry** — Komponen Traefik yang mengulang request ke Server lain bila Server tujuan tidak menjawab; inilah bentuk Failover Pasif pada varian container.
+**Middleware Retry** — Komponen Traefik yang mengulang request ke Server lain bila Server tujuan tidak menjawab; inilah bentuk Failover Pasif di project ini.
 
 **WRR (Weighted Round Robin)** — Algoritma default Traefik: round robin dengan bobot; pada project ini semua Server berbobot sama sehingga hasilnya bergiliran.
 

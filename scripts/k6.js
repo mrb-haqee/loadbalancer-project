@@ -3,7 +3,7 @@
  * Pembungkus k6 supaya perintahnya sama di Windows/Linux/macOS.
  *
  *   bun scripts/k6.js run k6/load-test.js
- *   bun scripts/k6.js run k6/failover.js -e BASE_URL=http://127.0.0.1:8080
+ *   bun scripts/k6.js run k6/failover.js -e BASE_URL=http://127.0.0.1:8088
  */
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

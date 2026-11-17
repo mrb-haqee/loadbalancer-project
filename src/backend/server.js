@@ -65,7 +65,8 @@ const server = http.createServer(async (req, res) => {
   requestCount += 1;
   const body = await readBody(req);
 
-  // Endpoint bantu untuk test least-connections: menahan koneksi selama N ms.
+  // Endpoint bantu demo: menahan respons selama N ms (default 250, maks 10000).
+  // Catatan: lewat Traefik, responseHeaderTimeout 2s memotong yang di atas 2 detik.
   if (url.pathname === '/slow') {
     slowRequestCount += 1;
     const requested = Number(url.searchParams.get('ms') ?? 250);

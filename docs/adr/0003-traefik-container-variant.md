@@ -1,7 +1,8 @@
 # 0003 — Varian container memakai Traefik, bukan Nginx
 
-- **Status:** Diterima
+- **Status:** Diterima — **satu-satunya varian yang tersisa** di project ini
 - **Tanggal:** 17 November 2026
+- **Revisi 17 November 2026:** varian Node dihapus atas permintaan pemilik project (hanya ingin versi container). Bagian di bawah yang menyebut varian Node dipertahankan sebagai catatan konteks saat keputusan diambil.
 
 ## Konteks
 
@@ -10,7 +11,7 @@ Versi Node (ADR 0001) berjalan sebagai proses lokal. Project pengguna sudah bera
 - Tidak boleh mengubah atau menyentuh container/network project yang sudah ada (`proxy`, `sanmedclinic_internal`, `shared-api`, container lama `traefik-traefik-1`).
 - Backend juga ikut container, bukan proses di host.
 - Cakupan tetap 3 backend demo, belum meneruskan ke aplikasi nyata.
-- Varian Node tetap dipertahankan sebagai pembanding yang bisa diuji.
+- Varian Node tetap dipertahankan sebagai pembanding yang bisa diuji. *(Revisi: sudah dihapus.)*
 
 Lingkungan: Docker Desktop 28.3.3 (Linux/WSL2), Compose v2.39.2, image `traefik:latest` = 3.6.6 dan `nginx:stable` sudah tersedia.
 
@@ -22,7 +23,7 @@ Lingkungan: Docker Desktop 28.3.3 (Linux/WSL2), Compose v2.39.2, image `traefik:
 
 ## Keputusan
 
-Memilih **Traefik 3.6** untuk varian container, berdampingan dengan varian Node.
+Memilih **Traefik 3.6** untuk varian container, berdampingan dengan varian Node *(sejak revisi: varian Node dihapus, Traefik menjadi satu-satunya load balancer)*.
 
 Detail yang ikut diputuskan:
 

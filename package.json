@@ -3,25 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Load balancer Node.js dengan 3 backend server, dashboard, dan test suite (smoke, distribusi, failover, beban).",
+  "description": "Load balancer Traefik + 3 backend server di Docker, tiap server punya URL sendiri, lengkap dengan test suite dan skenario k6.",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "start": "node scripts/run-all.js",
-    "start:lb": "node src/load-balancer/index.js",
-    "start:backend": "node src/backend/server.js",
-    "request": "node scripts/request.js",
-    "k6:install": "bun scripts/install-k6.js",
-    "k6": "bun scripts/k6.js",
-    "k6:load": "bun scripts/k6.js run k6/load-test.js",
-    "k6:failover": "bun scripts/k6.js run k6/failover.js -e DURATION=40s",
-    "test": "node --test --test-reporter=spec test/smoke.test.js test/distribution.test.js test/least-connections.test.js test/failover.test.js test/load.test.js",
-    "test:docker": "node --test --test-reporter=spec test/docker/lb-docker.test.js",
-    "test:all": "npm test && npm run test:docker",
     "docker:up": "docker compose -p lb-demo up -d --build",
     "docker:down": "docker compose -p lb-demo down --remove-orphans",
     "docker:ps": "docker compose -p lb-demo ps",
-    "docker:logs": "docker compose -p lb-demo logs --tail=80"
+    "docker:logs": "docker compose -p lb-demo logs --tail=80",
+    "test": "node --test --test-reporter=spec test/docker/lb-docker.test.js",
+    "test:docker": "node --test --test-reporter=spec test/docker/lb-docker.test.js",
+    "k6:install": "bun scripts/install-k6.js",
+    "k6": "bun scripts/k6.js",
+    "k6:load": "bun scripts/k6.js run k6/load-test.js",
+    "k6:failover": "bun scripts/k6.js run k6/failover.js -e DURATION=40s"
   }
 }

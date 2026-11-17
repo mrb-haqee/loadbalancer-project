@@ -1,16 +1,5 @@
 {
-  "loadBalancer": {
-    "host": "127.0.0.1",
-    "port": 8080,
-    "algorithm": "round-robin",
-    "healthCheck": {
-      "path": "/health",
-      "intervalMs": 2000,
-      "timeoutMs": 1000,
-      "failureThreshold": 1,
-      "successThreshold": 1
-    }
-  },
+  "_catatan": "Peta identitas backend. Di container, BACKEND_ID + BACKEND_HOST + BACKEND_PORT dari docker-compose.yml yang dipakai; nilai di sini hanya dipakai bila backend dijalankan langsung tanpa env.",
   "backends": [
     { "id": "server-1", "host": "127.0.0.1", "port": 3001 },
     { "id": "server-2", "host": "127.0.0.1", "port": 3002 },
