@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import http from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -59,28 +60,58 @@ export async function waitFor(predicate, { timeoutMs = 30000, intervalMs = 300, 
 }
 
 export async function request(path = '/', { base = LB_URL, ...init } = {}) {
-  const { signal, timeoutMs = 20000, ...rest } = init;
-  // Jangan pakai AbortSignal.timeout(): timer-nya unref'd, sehingga kalau fetch
-  // menggantung (mis. hostname belum siap), event loop Node bisa kosong dan
-  // proses keluar dengan "Promise resolution is still pending".
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(new Error(`request timeout ${timeoutMs}ms: ${base}${path}`)),
-    timeoutMs,
-  );
-  try {
-    const res = await fetch(`${base}${path}`, { ...rest, signal: signal ?? controller.signal });
-    const text = await res.text();
-    let body = text;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      /* biarkan teks (dashboard HTML) */
-    }
-    return { status: res.status, headers: res.headers, body, text, servedBy: res.headers.get('x-served-by') };
-  } finally {
-    clearTimeout(timer);
+  const { timeoutMs = 20000, ...rest } = init;
+  const url = new URL(`${base}${path}`);
+  const headers = { ...(rest.headers ?? {}) };
+
+  // Jangan bergantung pada resolusi DNS `*.localhost` milik OS: di sebagian
+  // mesin Windows hanya sebagian nama yang diresolusi. Untuk host .localhost
+  // kita tembak 127.0.0.1 dan tetap mengirim Host header yang sama, sehingga
+  // aturan router Traefik tetap diuji apa adanya.
+  if (url.hostname.endsWith('.localhost')) {
+    headers.host = url.hostname;
+    url.hostname = '127.0.0.1';
+    url.port = url.port || '80';
   }
+
+  // Jangan pakai AbortSignal.timeout(): timer-nya unref'd, sehingga kalau
+  // koneksi menggantung, event loop Node bisa kosong dan proses keluar dengan
+  // "Promise resolution is still pending".
+  const response = await new Promise((resolvePromise, rejectPromise) => {
+    const req = http.request(
+      url,
+      { method: rest.method ?? 'GET', headers },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolvePromise({
+            status: res.statusCode,
+            headers: res.headers,
+            text: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`request timeout ${timeoutMs}ms: ${base}${path}`)));
+    req.on('error', rejectPromise);
+    if (rest.body) req.write(rest.body);
+    req.end();
+  });
+
+  let body = response.text;
+  try {
+    body = JSON.parse(response.text);
+  } catch {
+    /* biarkan teks (dashboard HTML) */
+  }
+  return {
+    status: response.status,
+    headers: response.headers,
+    body,
+    text: response.text,
+    servedBy: response.headers['x-served-by'],
+  };
 }
 
 export function services() {
@@ -146,16 +177,16 @@ export async function up({ rebuild = true } = {}) {
   );
 
   // Traefik punya throttle ~2 detik sebelum container baru masuk konfigurasi.
-  // Jangan mulai test sebelum ketiga server benar-benar terdaftar dan UP.
+  // Jangan mulai test sebelum kelima server benar-benar terdaftar dan UP.
   await waitFor(
     async () => {
       const api = await request('/api/http/services', { base: DASHBOARD_URL });
       const demo = api.body.find((svc) => String(svc.name).startsWith('demo@'));
       const servers = demo?.loadBalancer?.servers ?? [];
       const statuses = Object.values(demo?.serverStatus ?? {});
-      return servers.length === 3 && statuses.filter((status) => status === 'UP').length === 3;
+      return servers.length === 5 && statuses.filter((status) => status === 'UP').length === 5;
     },
-    { label: '3 server terdaftar dan berstatus UP di Traefik', timeoutMs: 60000 },
+    { label: '5 server terdaftar dan berstatus UP di Traefik', timeoutMs: 60000 },
   );
 
   // Router "demo" pernah dibuang Traefik karena ambigu (2 service per container),

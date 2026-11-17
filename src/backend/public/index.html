@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Katalog Server — CRUD MariaDB</title>
+<style>
+  :root {
+    --bg: #f3f4f7;
+    --surface: #ffffff;
+    --ink: #171a21;
+    --muted: #667085;
+    --line: #e1e4ea;
+    --line-strong: #cbd0da;
+    --accent: #2f4bd8;
+    --accent-ink: #ffffff;
+    --accent-soft: #eef1ff;
+    --danger: #b42318;
+    --danger-soft: #fef3f2;
+    --ok: #067647;
+    --ok-soft: #ecfdf3;
+    --warn-soft: #fffaeb;
+    --warn-line: #f3d38a;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.05);
+    --radius: 14px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(900px 420px at 10% -10%, #e6e9ff 0%, transparent 60%),
+      radial-gradient(700px 380px at 100% 0%, #fdf1e3 0%, transparent 55%),
+      var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+  }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 40px 20px 64px; }
+
+  .eyebrow {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 600;
+    font-size: clamp(32px, 5vw, 46px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 10px;
+  }
+
+  .lede { max-width: 680px; margin: 0; color: var(--muted); font-size: 16px; }
+
+  .topline { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; justify-content: space-between; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .pill b { color: var(--ink); font-weight: 600; }
+
+  .notice {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin: 24px 0;
+    padding: 12px 14px;
+    border: 1px solid var(--warn-line);
+    border-radius: 10px;
+    background: var(--warn-soft);
+    color: #6b4b00;
+    font-size: 13.5px;
+  }
+
+  .notice strong { font-weight: 700; }
+
+  main { display: grid; gap: 20px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .card-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .card-head h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .meta { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+
+  form { padding: 20px 22px 22px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; font-weight: 600; color: #3d4450; }
+
+  label.wide { grid-column: span 3; }
+
+  label.check {
+    flex-direction: row;
+    align-items: center;
+    gap: 9px;
+    align-self: end;
+    min-height: 40px;
+    padding-bottom: 2px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  input[type="text"], input[type="number"], input:not([type]) {
+    width: 100%;
+    height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--line-strong);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  input[type="text"]:focus, input[type="number"]:focus, input:not([type]):focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(47, 75, 216, 0.14);
+  }
+
+  input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); }
+
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; }
+
+  button {
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    border-radius: 9px;
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink);
+    padding: 9px 15px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+  }
+
+  button:hover { background: #f7f8fa; border-color: #b7bdc9; }
+  button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47, 75, 216, 0.22); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button.primary:hover { background: #2740be; border-color: #2740be; }
+
+  button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  button.ghost:hover { background: #f2f4f7; color: var(--ink); }
+
+  button.link {
+    padding: 4px 6px;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 13px;
+  }
+  button.link:hover { background: var(--accent-soft); }
+
+  button.link.danger { color: var(--danger); }
+  button.link.danger:hover { background: var(--danger-soft); }
+
+  .hint { color: var(--muted); font-size: 12.5px; }
+
+  .form-error, .table-error {
+    margin: 14px 0 0;
+    padding: 10px 12px;
+    border: 1px solid #f3b7b1;
+    border-radius: 9px;
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-size: 13.5px;
+  }
+
+  .table-error { margin: 16px 22px 0; }
+
+  .table-wrap { overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+
+  th {
+    text-align: left;
+    padding: 11px 16px;
+    background: #fafbfc;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  th:first-child, td:first-child { padding-left: 22px; }
+  th:last-child, td:last-child { padding-right: 22px; }
+
+  td { padding: 13px 16px; border-bottom: 1px solid #eef0f4; vertical-align: top; }
+
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: #fcfcfe; }
+
+  .name { font-weight: 650; }
+  .id { display: block; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+  code {
+    font-family: "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace;
+    font-size: 12.5px;
+    background: #f4f5f8;
+    border: 1px solid #e7e9ef;
+    border-radius: 6px;
+    padding: 2px 6px;
+    white-space: nowrap;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .badge.on { background: var(--ok-soft); color: var(--ok); }
+  .badge.off { background: #f2f4f7; color: var(--muted); }
+
+  .note { max-width: 230px; color: #475467; }
+  .muted { color: #98a2b3; }
+  .stamp { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+  .row-actions { text-align: right; white-space: nowrap; }
+
+  .empty { text-align: center; padding: 38px 20px; color: var(--muted); }
+  .empty b { display: block; color: var(--ink); margin-bottom: 4px; }
+
+  footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    justify-content: space-between;
+    margin-top: 26px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  #toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translate(-50%, 16px);
+    max-width: min(92vw, 460px);
+    padding: 11px 16px;
+    border-radius: 10px;
+    background: #101828;
+    color: #fff;
+    font-size: 13.5px;
+    box-shadow: 0 12px 32px rgba(16, 24, 40, 0.24);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s, transform 0.18s;
+    z-index: 10;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast.error { background: #7a271a; }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    label.wide { grid-column: span 2; }
+    .note { display: none; }
+    th:nth-child(5), td:nth-child(5) { display: none; }
+  }
+
+  @media (max-width: 620px) {
+    .page { padding-top: 26px; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    label.wide { grid-column: auto; }
+    .stamp { display: none; }
+    th:nth-child(6), td:nth-child(6) { display: none; }
+    .card-head, form { padding-left: 16px; padding-right: 16px; }
+    th:first-child, td:first-child { padding-left: 16px; }
+    th:last-child, td:last-child { padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="topline">
+      <div>
+        <span class="eyebrow">Load balancer demo</span>
+        <h1>Katalog Server</h1>
+        <p class="lede">
+          CRUD sederhana untuk daftar server yang tersimpan di MariaDB. Halaman ini dilayani
+          backend mana pun yang dipilih Traefik, tetapi datanya satu: ditulis di satu server,
+          langsung terbaca di server lain.
+        </p>
+      </div>
+      <div class="pills">
+        <span class="pill">MariaDB 11.4</span>
+        <span class="pill">Dilayani oleh <b id="served-by">—</b></span>
+      </div>
+    </div>
+
+    <div class="notice">
+      <span aria-hidden="true">ℹ</span>
+      <span>
+        <strong>Ini katalog, bukan pengatur rotasi.</strong>
+        Menambah atau menghapus baris di sini tidak mengubah server mana yang dipakai Traefik.
+        Rotasi tetap ditentukan label container di <code>docker-compose.yml</code>.
+      </span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card" aria-labelledby="form-title">
+      <div class="card-head">
+        <h2 id="form-title">Tambah server</h2>
+        <button type="button" class="ghost" id="cancel-edit" hidden>Batal edit</button>
+      </div>
+      <form id="server-form" novalidate>
+        <div class="grid">
+          <label>Nama
+            <input id="name" name="name" type="text" maxlength="64" required
+                   pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" placeholder="server-6" autocomplete="off">
+          </label>
+          <label>Host
+            <input id="host" name="host" type="text" maxlength="255" required
+                   pattern="[A-Za-z0-9][A-Za-z0-9._:\-]*" placeholder="server-6" autocomplete="off">
+          </label>
+          <label>Port
+            <input id="port" name="port" type="number" min="1" max="65535" step="1" value="3000" required>
+          </label>
+          <label>Bobot
+            <input id="weight" name="weight" type="number" min="1" max="100" step="1" value="1" required>
+          </label>
+          <label class="wide">Catatan
+            <input id="note" name="note" type="text" maxlength="255" placeholder="Opsional — mis. backend cadangan">
+          </label>
+          <label class="check">
+            <input id="enabled" name="enabled" type="checkbox" checked>
+            Aktif di katalog
+          </label>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit" id="submit-btn">Simpan server</button>
+          <button class="ghost" type="reset" id="reset-btn">Kosongkan</button>
+          <span class="hint">Nama harus unik. Port 1–65535, bobot 1–100.</span>
+        </div>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="table-title">
+      <div class="card-head">
+        <h2 id="table-title">Daftar server</h2>
+        <div class="meta">
+          <span id="count">0 server</span>
+          <button type="button" class="link" id="refresh-btn">Muat ulang</button>
+        </div>
+      </div>
+      <p class="table-error" id="table-error" role="alert" hidden></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nama</th>
+              <th>Host:Port</th>
+              <th>Bobot</th>
+              <th>Status</th>
+              <th>Catatan</th>
+              <th>Diperbarui</th>
+              <th><span class="sr-only">Aksi</span></th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td class="empty" colspan="7">Memuat…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Data tersimpan di MariaDB · API <code>/api/servers</code></span>
+    <span>Adminer: <a href="http://adminer.localhost" target="_blank" rel="noreferrer">adminer.localhost</a> · <a href="http://127.0.0.1:8081" target="_blank" rel="noreferrer">127.0.0.1:8081</a></span>
+  </footer>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+  const API = '/api/servers';
+  const state = { editingId: null, servers: [] };
+
+  const $ = (id) => document.getElementById(id);
+  const form = $('server-form');
+  const rows = $('rows');
+  let toastTimer;
+
+  class ApiError extends Error {
+    constructor(status, message) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+    }
+  }
+
+  function setServedBy(value) {
+    if (value) $('served-by').textContent = value;
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (character) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[character]);
+  }
+
+  function formatDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  }
+
+  function toast(message, kind = 'ok') {
+    const element = $('toast');
+    element.textContent = message;
+    element.classList.toggle('error', kind === 'error');
+    element.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => element.classList.remove('show'), 3200);
+  }
+
+  function setFormError(message) {
+    const element = $('form-error');
+    element.textContent = message || '';
+    element.hidden = !message;
+  }
+
+  function setTableError(message) {
+    const element = $('table-error');
+    element.textContent = message || '';
+    element.hidden = !message;
+  }
+
+  async function api(path, options = {}) {
+    let response;
+    try {
+      response = await fetch(path, {
+        ...options,
+        headers: { 'content-type': 'application/json', ...(options.headers || {}) },
+      });
+    } catch {
+      throw new ApiError(0, 'Tidak bisa menghubungi backend. Cek apakah stack sedang hidup.');
+    }
+
+    setServedBy(response.headers.get('x-served-by'));
+
+    if (response.status === 204) return null;
+
+    const text = await response.text();
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+
+    if (!response.ok) {
+      const details = payload?.error?.details;
+      const detailText = Array.isArray(details) && details.length
+        ? details.map((item) => item.message).join(' ')
+        : null;
+      const message = detailText || payload?.error?.message || `Request gagal (HTTP ${response.status}).`;
+      throw new ApiError(response.status, message);
+    }
+
+    return payload;
+  }
+
+  function rowHtml(server) {
+    const note = server.note
+      ? escapeHtml(server.note)
+      : '<span class="muted">—</span>';
+    const status = server.enabled
+      ? '<span class="badge on">Aktif</span>'
+      : '<span class="badge off">Nonaktif</span>';
+
+    return `
+      <tr>
+        <td><span class="name">${escapeHtml(server.name)}</span><span class="id">#${server.id}</span></td>
+        <td><code>${escapeHtml(server.host)}:${escapeHtml(server.port)}</code></td>
+        <td>${escapeHtml(server.weight)}</td>
+        <td>${status}</td>
+        <td class="note">${note}</td>
+        <td class="stamp">${escapeHtml(formatDate(server.updatedAt))}</td>
+        <td class="row-actions">
+          <button type="button" class="link" data-action="edit" data-id="${server.id}">Edit</button>
+          <button type="button" class="link danger" data-action="delete" data-id="${server.id}">Hapus</button>
+        </td>
+      </tr>`;
+  }
+
+  function render() {
+    $('count').textContent = `${state.servers.length} server`;
+    if (!state.servers.length) {
+      rows.innerHTML = `
+        <tr><td class="empty" colspan="7">
+          <b>Katalog masih kosong.</b>
+          Tambah server pertama lewat form di atas, atau jalankan <code>npm run db:reset</code> untuk memuat seed.
+        </td></tr>`;
+      return;
+    }
+    rows.innerHTML = state.servers.map(rowHtml).join('');
+  }
+
+  async function loadServers() {
+    setTableError('');
+    rows.innerHTML = '<tr><td class="empty" colspan="7">Memuat…</td></tr>';
+    try {
+      const data = await api(API);
+      state.servers = Array.isArray(data) ? data : [];
+      render();
+    } catch (error) {
+      state.servers = [];
+      $('count').textContent = '0 server';
+      const hint = error.status === 503 ? ' Jalankan <code>npm run db:up</code>, lalu muat ulang.' : '';
+      rows.innerHTML = `
+        <tr><td class="empty" colspan="7">
+          <b>Katalog belum bisa dimuat.</b>
+          ${escapeHtml(error.message)}${hint}
+        </td></tr>`;
+      setTableError('');
+    }
+  }
+
+  function resetForm() {
+    state.editingId = null;
+    form.reset();
+    $('port').value = '3000';
+    $('weight').value = '1';
+    $('enabled').checked = true;
+    $('form-title').textContent = 'Tambah server';
+    $('submit-btn').textContent = 'Simpan server';
+    $('cancel-edit').hidden = true;
+    setFormError('');
+  }
+
+  function startEdit(server) {
+    state.editingId = server.id;
+    $('name').value = server.name;
+    $('host').value = server.host;
+    $('port').value = server.port;
+    $('weight').value = server.weight;
+    $('enabled').checked = Boolean(server.enabled);
+    $('note').value = server.note ?? '';
+    $('form-title').textContent = `Edit ${server.name}`;
+    $('submit-btn').textContent = 'Simpan perubahan';
+    $('cancel-edit').hidden = false;
+    setFormError('');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('name').focus({ preventScroll: true });
+  }
+
+  async function removeServer(server) {
+    if (!window.confirm(`Hapus "${server.name}" dari katalog?`)) return;
+    try {
+      await api(`${API}/${server.id}`, { method: 'DELETE' });
+      if (state.editingId === server.id) resetForm();
+      toast('Server dihapus dari katalog.');
+      await loadServers();
+    } catch (error) {
+      setTableError(error.message);
+    }
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setFormError('');
+
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+
+    const payload = {
+      name: $('name').value.trim(),
+      host: $('host').value.trim(),
+      port: Number($('port').value),
+      weight: Number($('weight').value),
+      enabled: $('enabled').checked,
+      note: $('note').value.trim() || null,
+    };
+
+    const editingId = state.editingId;
+    const button = $('submit-btn');
+    button.disabled = true;
+    button.textContent = 'Menyimpan…';
+
+    try {
+      if (editingId) {
+        await api(`${API}/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        toast('Perubahan tersimpan.');
+      } else {
+        await api(API, { method: 'POST', body: JSON.stringify(payload) });
+        toast('Server ditambahkan ke katalog.');
+      }
+      resetForm();
+      await loadServers();
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = editingId ? 'Simpan perubahan' : 'Simpan server';
+    }
+  });
+
+  form.addEventListener('reset', () => {
+    setTimeout(() => {
+      state.editingId = null;
+      $('form-title').textContent = 'Tambah server';
+      $('submit-btn').textContent = 'Simpan server';
+      $('cancel-edit').hidden = true;
+      $('port').value = '3000';
+      $('weight').value = '1';
+      $('enabled').checked = true;
+      setFormError('');
+    }, 0);
+  });
+
+  $('cancel-edit').addEventListener('click', resetForm);
+  $('refresh-btn').addEventListener('click', loadServers);
+
+  rows.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const server = state.servers.find((item) => item.id === Number(button.dataset.id));
+    if (!server) return;
+    if (button.dataset.action === 'edit') startEdit(server);
+    if (button.dataset.action === 'delete') removeServer(server);
+  });
+
+  loadServers();
+</script>
+</body>
+</html>

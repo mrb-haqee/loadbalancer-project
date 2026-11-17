@@ -8,10 +8,10 @@ name: lb-k6
 #
 # Dua sumber data, dua dashboard:
 # - InfluxDB 1.8  → hasil test k6 (dashboard `k6-lb`)
-# - Prometheus    → trafik nyata dari Traefik + 3 backend (dashboard `lb-realtime`)
+# - Prometheus    → trafik nyata dari Traefik + 5 backend (dashboard `lb-realtime`)
 
 services:
-  # Prometheus menyimpan angka trafik nyata (Traefik + 3 backend).
+  # Prometheus menyimpan angka trafik nyata (Traefik + 5 backend).
   # Sengaja tidak dipublikasikan ke host dan tidak dirutekan lewat Traefik:
   # satu-satunya konsumennya Grafana.
   prometheus:

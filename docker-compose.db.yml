@@ -1,0 +1,72 @@
+name: lb-db
+
+# Stack database TERPISAH dari load balancer (lb-demo) dan monitoring (lb-k6).
+# - MariaDB tidak dipublikasikan ke host dan tidak dirutekan Traefik: hanya
+#   bisa dijangkau dari `lb-net`.
+# - Adminer (pembaca isi database) punya dua pintu:
+#     http://adminer.localhost     -> lewat Traefik (jalur utama)
+#     http://127.0.0.1:8081        -> cadangan loopback
+#   Label Traefik di bawah hanya menambah rute bila Traefik hidup; tanpa
+#   Traefik, port 8081 tetap jalan sehingga stack DB bisa berdiri sendiri.
+# - Nama service `mariadb` adalah alamat yang dipakai backend (DB_HOST=mariadb).
+#
+# Nilai di bawah adalah kredensial DEMO. Ganti lewat `.env` (lihat .env.example).
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-lb_demo}
+      MARIADB_USER: ${MARIADB_USER:-lb_app}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-lb_app_password}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-lb_root_password}
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    volumes:
+      - lb-db-data:/var/lib/mysql
+      # Skema + seed hanya dibaca saat volume masih kosong.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - lb-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # Adminer: satu halaman untuk membaca/menyunting isi MariaDB.
+  # Login: server `mariadb`, user `lb_app`, password dari .env.
+  adminer:
+    image: adminer:4
+    environment:
+      ADMINER_DEFAULT_SERVER: mariadb
+    # Prioritas 200 > router "demo" (1) yang menangkap semua host sebagai
+    # fallback. Tanpa ini, adminer.localhost ikut dilempar ke backend.
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.adminer.entrypoints: "web"
+      traefik.http.routers.adminer.rule: "Host(`adminer.localhost`)"
+      traefik.http.routers.adminer.priority: "200"
+      traefik.http.routers.adminer.service: "adminer"
+      traefik.http.services.adminer.loadbalancer.server.port: "8080"
+    # Cadangan loopback: tetap ada supaya stack DB bisa dipakai tanpa Traefik.
+    ports:
+      - "127.0.0.1:${ADMINER_PORT:-8081}:8080"
+    networks:
+      - lb-net
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  lb-db-data:
+    name: lb-db-data
+
+networks:
+  lb-net:
+    external: true
+    name: lb-net

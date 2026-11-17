@@ -3,6 +3,8 @@
   "backends": [
     { "id": "server-1", "host": "127.0.0.1", "port": 3001 },
     { "id": "server-2", "host": "127.0.0.1", "port": 3002 },
-    { "id": "server-3", "host": "127.0.0.1", "port": 3003 }
+    { "id": "server-3", "host": "127.0.0.1", "port": 3003 },
+    { "id": "server-4", "host": "127.0.0.1", "port": 3004 },
+    { "id": "server-5", "host": "127.0.0.1", "port": 3005 }
   ]
 }

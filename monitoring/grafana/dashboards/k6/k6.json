@@ -1,6 +1,6 @@
 {
   "uid": "k6-lb",
-  "title": "k6 — Load Balancer 3 Server",
+  "title": "k6 - Load Balancer 5 Server",
   "tags": ["k6", "load-balancer"],
   "timezone": "browser",
   "schemaVersion": 39,

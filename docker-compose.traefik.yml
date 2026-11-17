@@ -2,7 +2,8 @@ name: lb-traefik
 
 # Traefik berdiri sendiri: tidak memiliki backend maupun dashboard monitoring.
 # Tugasnya hanya menerima trafik dan meneruskannya ke container berlabel di
-# network lb-net (backend di project lb-demo, Grafana/k6 di project lb-k6).
+# network lb-net (backend di project lb-demo, Grafana/k6 di project lb-k6,
+# Adminer di project lb-db).
 #
 # Network lb-net dibuat sekali di luar compose (`npm run net:up`), supaya tidak
 # ada project yang jadi "induk" tersembunyi dari project lain.

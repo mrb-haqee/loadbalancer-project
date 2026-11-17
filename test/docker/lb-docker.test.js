@@ -15,7 +15,7 @@ import {
   waitFor,
 } from './helpers/docker-stack.js';
 
-const SERVERS = ['server-1', 'server-2', 'server-3', 'server-4'];
+const SERVERS = ['server-1', 'server-2', 'server-3', 'server-4', 'server-5'];
 
 function countBy(results) {
   const counts = {};
@@ -24,7 +24,7 @@ function countBy(results) {
 }
 
 test(
-  'varian container: Traefik 3 server + URL sendiri per server',
+  'varian container: Traefik 5 server + URL sendiri per server',
   {
     timeout: 600000,
     skip: dockerAvailable() ? false : 'Docker daemon tidak berjalan (nyalakan Docker Desktop)',
@@ -33,7 +33,7 @@ test(
     await up({ rebuild: true });
     t.after(() => down());
 
-    await t.test('smoke: 3 container sehat, dashboard hidup, 4 URL menjawab', async () => {
+    await t.test('smoke: 5 container sehat, dashboard hidup, semua URL menjawab', async () => {
       const list = services();
       for (const name of SERVERS) {
         const svc = list.find((entry) => entry.Service === name);
@@ -60,10 +60,10 @@ test(
         assert.equal(res.servedBy, name);
       }
 
-      // Traefik: 1 service load balance (3 server) + 3 service langsung (1 server).
+      // Traefik: 1 service load balance (5 server) + 5 service langsung (1 server).
       const api = await request('/api/http/services', { base: DASHBOARD_URL });
       const demo = api.body.find((svc) => String(svc.name).startsWith('demo@'));
-      assert.equal(demo.loadBalancer.servers.length, 3, 'service demo harus berisi 3 server');
+      assert.equal(demo.loadBalancer.servers.length, 5, 'service demo harus berisi 5 server');
 
       const routers = await request('/api/http/routers', { base: DASHBOARD_URL });
       for (const name of SERVERS) {
@@ -89,9 +89,9 @@ test(
       }
 
       const counts = countBy(results);
-      assert.equal(Object.keys(counts).length, 3, `harus dilayani 3 server, dapat: ${JSON.stringify(counts)}`);
+      assert.equal(Object.keys(counts).length, 5, `harus dilayani 5 server, dapat: ${JSON.stringify(counts)}`);
       for (const name of SERVERS) {
-        assert.ok(counts[name] >= 5 && counts[name] <= 15, `porsi ${name} tidak wajar: ${JSON.stringify(counts)}`);
+        assert.ok(counts[name] >= 3 && counts[name] <= 12, `porsi ${name} tidak wajar: ${JSON.stringify(counts)}`);
       }
       t.diagnostic(`sebaran 30 request via ${LB_HOST_URL}: ${JSON.stringify(counts)}`);
     });
@@ -129,7 +129,7 @@ test(
 
       const failed = results.filter((res) => res.status !== 200);
       assert.equal(failed.length, 0, `${failed.length} request gagal`);
-      assert.equal(Object.keys(countBy(results)).length, 3);
+      assert.equal(Object.keys(countBy(results)).length, 5);
       t.diagnostic(`300 request dalam ${durationMs}ms (±${Math.round((total / durationMs) * 1000)} req/detik)`);
     });
 
@@ -148,16 +148,16 @@ test(
         async () => {
           const api = await request('/api/http/services', { base: DASHBOARD_URL });
           const demo = api.body.find((svc) => String(svc.name).startsWith('demo@'));
-          return demo?.loadBalancer?.servers?.length === 2;
+          return demo?.loadBalancer?.servers?.length === 4;
         },
-        { label: 'Traefik menurunkan server-2 (tinggal 2 server)', timeoutMs: 40000 },
+        { label: 'Traefik menurunkan server-2 (tinggal 4 server)', timeoutMs: 40000 },
       );
 
-      // URL LB tetap jalan, hanya 2 server.
+      // URL LB tetap jalan, hanya 4 server.
       const afterDown = [];
       for (let i = 0; i < 20; i += 1) afterDown.push(await request(`/setelah-mati?i=${i}`));
       assert.ok(afterDown.every((res) => res.status === 200));
-      assert.deepEqual(Object.keys(countBy(afterDown)).sort(), ['server-1', 'server-3']);
+      assert.deepEqual(Object.keys(countBy(afterDown)).sort(), ['server-1', 'server-3', 'server-4', 'server-5']);
 
       // URL server-2 harus gagal (tidak jatuh ke load balancer / server lain).
       await waitFor(
@@ -184,7 +184,7 @@ test(
 
       const api = await request('/api/http/services', { base: DASHBOARD_URL });
       const demo = api.body.find((svc) => String(svc.name).startsWith('demo@'));
-      assert.equal(demo.loadBalancer.servers.length, 3, 'server harus kembali berjumlah 3');
+      assert.equal(demo.loadBalancer.servers.length, 5, 'server harus kembali berjumlah 5');
     });
 
     t.diagnostic(`URL: ${LB_HOST_URL} · ${LB_URL} · dashboard ${DASHBOARD_URL}`);

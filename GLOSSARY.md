@@ -80,7 +80,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **InfluxDB** — Database deret waktu tempat metrik k6 disimpan; di project ini versi 1.8, database `k6`, tidak dipublikasikan ke host.
 
-**Prometheus** — Database deret waktu berbasis *pull*: ia sendiri yang menembak endpoint `/metrics` secara berkala; di project ini menyimpan trafik nyata Traefik + 3 backend, retensi 7 hari, tanpa port publik.
+**Prometheus** — Database deret waktu berbasis *pull*: ia sendiri yang menembak endpoint `/metrics` secara berkala; di project ini menyimpan trafik nyata Traefik + semua backend, retensi 7 hari, tanpa port publik.
 
 **Metrics Endpoint** — URL yang mengembalikan metrik dalam format teks Prometheus (`# HELP`, `# TYPE`, `nama{label} nilai`); di project ini `http://server-N:3000/metrics` (internal `lb-net`) dan `http://traefik:8080/metrics`.
 
@@ -115,3 +115,21 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 **Web Dashboard k6** — Dashboard bawaan binary k6 yang tampil real-time selama test di port 5665 dan bisa diekspor jadi `report.html`; datanya hilang setelah test selesai, berbeda dari Grafana.
 
 **Network Eksternal (external network)** — Network yang sudah ada dan dibuat project lain; `lb-net` dipakai stack monitoring sebagai external supaya k6 bisa menembak Traefik tanpa menggabungkan kedua project.
+
+## Istilah database & CRUD
+
+**Server Terdaftar** — Satu baris katalog di MariaDB: nama, host, port, bobot, status aktif, dan catatan. Berbeda dari **Server (Backend)**, yang berarti container yang benar-benar melayani request. Menambah atau menghapus Server Terdaftar tidak mengubah rotasi Traefik.
+
+**Katalog Server** — Kumpulan Server Terdaftar yang ditampilkan dan diubah lewat UI `/ui` atau API `/api/servers`. Isinya data demo untuk memperlihatkan CRUD, bukan konfigurasi yang dibaca Traefik, Prometheus, atau k6.
+
+**CRUD** — Empat operasi dasar terhadap katalog: membuat, membaca, mengganti, dan menghapus satu Server Terdaftar.
+
+**Database Compose (`lb-db`)** — Project compose terpisah berisi MariaDB dan Adminer. Tidak dipublikasikan lewat Traefik; hanya MariaDB yang dijangkau backend lewat network `lb-net`.
+
+**Pembaca Database (Adminer)** — Halaman web untuk membuka tabel dan isi MariaDB tanpa menulis query. Punya dua pintu: `adminer.localhost` lewat Traefik (router prioritas 200) dan `127.0.0.1:8081` sebagai cadangan loopback. Tanpa auth tambahan; hanya untuk lokal.
+
+**SQL Init** — Skrip SQL yang dijalankan MariaDB sekali saat volume database masih kosong. Perubahan pada skrip itu tidak berlaku pada volume yang sudah berisi data; karena itu ada `db:reset`.
+
+**Pool Koneksi** — Kumpulan koneksi database yang dipakai ulang backend, bukan satu koneksi baru per request. Pool dibuat malas: backend tetap start dan tetap sehat walau MariaDB belum hidup.
+
+**Database Tidak Tersedia (503)** — Keadaan saat endpoint CRUD tidak bisa menjangkau MariaDB. Backend tetap sehat dan endpoint demo tetap bekerja; hanya operasi katalog yang gagal.

@@ -17,7 +17,7 @@ scrape_configs:
 
   # Satu target per container backend, ditemukan lewat Docker API (socket
   # read-only). Label `server` diambil dari nama service compose, jadi
-  # dashboard tetap menampilkan server-1/2/3/... bukan IP.
+  # dashboard tetap menampilkan server-1/2/.../N bukan IP.
   - job_name: backend
     docker_sd_configs:
       - host: unix:///var/run/docker.sock

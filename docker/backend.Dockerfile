@@ -2,8 +2,12 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Tanpa dependency eksternal: cukup src + config.json.
-COPY package.json config.json ./
+# Satu-satunya dependency runtime: driver MariaDB (mysql2).
+# src/backend/public/index.html ikut tersalin bersama folder src.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
+COPY config.json ./
 COPY src ./src
 
 ENV NODE_ENV=production \

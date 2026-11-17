@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { loadConfig } from '../shared/config.js';
 import { createLogger } from '../shared/logger.js';
+import { closePool, databaseTarget } from './db.js';
+import { readBody, sendApiError, sendHtml, sendJson } from './http.js';
+import { handleServersApi } from './servers/routes.js';
 
 const config = loadConfig();
 const backendId = process.env.BACKEND_ID;
@@ -26,6 +30,10 @@ const startedAt = Date.now();
 let requestCount = 0;
 let slowRequestCount = 0;
 
+// Halaman CRUD katalog server. Dibaca sekali saat start; ubah file lalu restart container.
+const uiHtml = readFileSync(new URL('./public/index.html', import.meta.url), 'utf8');
+const responseHeaders = { 'x-served-by': self.id };
+
 // Histogram durasi request untuk /metrics (format Prometheus).
 // Health check dan /metrics sendiri tidak dihitung agar angkanya tidak tercemar
 // probe 2 detik milik Traefik.
@@ -36,26 +44,7 @@ let durationCount = 0;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function sendJson(res, statusCode, payload, extraHeaders = {}) {
-  const body = JSON.stringify(payload, null, 2);
-  res.writeHead(statusCode, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(body),
-    ...extraHeaders,
-  });
-  res.end(body);
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
-
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host ?? self.host}`);
   const startedAtNs = process.hrtime.bigint();
 
@@ -69,7 +58,8 @@ const server = http.createServer(async (req, res) => {
     }
   });
 
-  // Health endpoint: sengaja tidak dihitung sebagai trafik aplikasi.
+  // Health endpoint: sengaja tidak mengecek database dan tidak dihitung sebagai
+  // trafik aplikasi. Kalau DB mati, Traefik tetap menganggap backend sehat.
   if (url.pathname === '/health') {
     return sendJson(res, 200, {
       status: 'ok',
@@ -112,6 +102,23 @@ const server = http.createServer(async (req, res) => {
   }
 
   requestCount += 1;
+
+  // UI katalog server: satu halaman statis, datanya dari /api/servers.
+  // Bisa dibuka lewat load balancer (server.localhost/ui) maupun URL langsung.
+  if (url.pathname === '/ui' || url.pathname === '/ui/') {
+    return sendHtml(res, 200, uiHtml, responseHeaders);
+  }
+
+  // API katalog server. Path lain di bawah /api tetap dibalas JSON 404,
+  // supaya tidak tertukar dengan respons echo milik demo load balancing.
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+    const handled = await handleServersApi(req, res, url, responseHeaders);
+    if (!handled) {
+      sendApiError(res, 404, 'NOT_FOUND', `Endpoint ${url.pathname} tidak dikenal.`, undefined, responseHeaders);
+    }
+    return undefined;
+  }
+
   const body = await readBody(req);
 
   // Endpoint bantu demo: menahan respons selama N ms (default 250, maks 10000).
@@ -133,7 +140,7 @@ const server = http.createServer(async (req, res) => {
         slowRequestCount,
         servedAt: new Date().toISOString(),
       },
-      { 'x-served-by': self.id },
+      responseHeaders,
     );
   }
 
@@ -151,8 +158,19 @@ const server = http.createServer(async (req, res) => {
       bodyBytes: Buffer.byteLength(body),
       servedAt: new Date().toISOString(),
     },
-    { 'x-served-by': self.id },
+    responseHeaders,
   );
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => {
+    log.error(`request gagal: ${error?.stack ?? error?.message ?? error}`);
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+    sendApiError(res, 500, 'INTERNAL_ERROR', 'Terjadi kesalahan internal di backend.', undefined, responseHeaders);
+  });
 });
 
 server.on('error', (error) => {
@@ -162,11 +180,15 @@ server.on('error', (error) => {
 
 server.listen(self.port, self.host, () => {
   log.info(`siap di http://${self.host}:${self.port} (pid ${process.pid})`);
+  log.info(`UI katalog: http://${self.host}:${self.port}/ui · DB ${databaseTarget()}`);
 });
 
 function shutdown(signal) {
   log.info(`${signal} diterima, menutup server`);
-  server.close(() => process.exit(0));
+  server.close(async () => {
+    await closePool().catch((error) => log.warn(`gagal menutup pool DB: ${error.message}`));
+    process.exit(0);
+  });
   setTimeout(() => process.exit(0), 2000).unref();
 }
 

@@ -1,6 +1,6 @@
 name: lb-demo
 
-# Label bersama: satu Traefik service "demo" berisi 3 server milik semua container.
+# Label bersama: satu Traefik service "demo" berisi 5 server milik semua container.
 # Router "demo" menerima semua host (fallback) → inilah jalur load balancing,
 # termasuk untuk http://server.localhost.
 x-main-labels: &main-labels
@@ -61,6 +61,17 @@ x-direct-5: &direct-5
   traefik.http.routers.direct-5.service: "direct-5"
   traefik.http.services.direct-5.loadbalancer.server.port: "3000"
 
+# Koneksi MariaDB untuk endpoint CRUD katalog server (/ui dan /api/servers).
+# Database hidup di project compose terpisah (lb-db, docker-compose.db.yml).
+# Kalau DB belum jalan, backend tetap sehat dan endpoint demo tetap bekerja;
+# hanya CRUD yang membalas 503.
+x-db-env: &db-env
+  DB_HOST: mariadb
+  DB_PORT: "3306"
+  DB_NAME: ${MARIADB_DATABASE:-lb_demo}
+  DB_USER: ${MARIADB_USER:-lb_app}
+  DB_PASSWORD: ${MARIADB_PASSWORD:-lb_app_password}
+
 services:
   # Hanya service ini yang mem-build image; server-2/3 memakai image yang sama.
   server-1:
@@ -70,6 +81,7 @@ services:
       dockerfile: docker/backend.Dockerfile
     environment:
       BACKEND_ID: server-1
+      <<: *db-env
     networks:
       - lb-net
     labels:
@@ -80,6 +92,7 @@ services:
     image: lb-demo-backend:latest
     environment:
       BACKEND_ID: server-2
+      <<: *db-env
     networks:
       - lb-net
     labels:
@@ -90,6 +103,7 @@ services:
     image: lb-demo-backend:latest
     environment:
       BACKEND_ID: server-3
+      <<: *db-env
     networks:
       - lb-net
     labels:
@@ -100,6 +114,7 @@ services:
     image: lb-demo-backend:latest
     environment:
       BACKEND_ID: server-4
+      <<: *db-env
     networks:
       - lb-net
     labels:
@@ -110,6 +125,7 @@ services:
     image: lb-demo-backend:latest
     environment:
       BACKEND_ID: server-5
+      <<: *db-env
     networks:
       - lb-net
     labels:

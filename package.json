@@ -3,12 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Load balancer Traefik + 3 backend server di Docker, tiap server punya URL sendiri, lengkap dengan test suite, k6 di container, dan dashboard Grafana.",
+  "description": "Load balancer Traefik + 5 backend server di Docker, tiap server punya URL sendiri, lengkap dengan CRUD katalog server di MariaDB, test suite, k6 di container, dan dashboard Grafana.",
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "mysql2": "^3.24.6"
+  },
   "scripts": {
     "net:up": "node scripts/network.js",
+    "db:up": "docker compose -p lb-db -f docker-compose.db.yml up -d",
+    "db:down": "docker compose -p lb-db -f docker-compose.db.yml down",
+    "db:reset": "docker compose -p lb-db -f docker-compose.db.yml down -v && docker compose -p lb-db -f docker-compose.db.yml up -d",
+    "db:ps": "docker compose -p lb-db -f docker-compose.db.yml ps",
+    "db:logs": "docker compose -p lb-db -f docker-compose.db.yml logs --tail=80",
     "traefik:up": "docker compose -p lb-traefik -f docker-compose.traefik.yml up -d",
     "traefik:down": "docker compose -p lb-traefik -f docker-compose.traefik.yml down",
     "traefik:logs": "docker compose -p lb-traefik -f docker-compose.traefik.yml logs --tail=80",
@@ -21,9 +29,10 @@
     "k6:watch": "docker compose -p lb-k6 -f docker-compose.monitoring.yml run --rm --service-ports -e K6_WEB_DASHBOARD=true k6",
     "k6:down": "docker compose -p lb-k6 -f docker-compose.monitoring.yml down --remove-orphans",
     "k6:logs": "docker compose -p lb-k6 -f docker-compose.monitoring.yml logs --tail=80",
-    "stack:up": "npm run net:up && npm run traefik:up && npm run docker:up && npm run k6:up",
-    "stack:down": "npm run k6:down && npm run docker:down && npm run traefik:down",
+    "stack:up": "npm run net:up && npm run db:up && npm run traefik:up && npm run docker:up && npm run k6:up",
+    "stack:down": "npm run k6:down && npm run docker:down && npm run traefik:down && npm run db:down",
     "test": "node --test --test-reporter=spec test/docker/lb-docker.test.js",
+    "test:backend": "node --test --test-reporter=spec test/backend/servers-validation.test.js",
     "test:docker": "node --test --test-reporter=spec test/docker/lb-docker.test.js",
     "k6:install": "bun scripts/install-k6.js",
     "k6": "bun scripts/k6.js",

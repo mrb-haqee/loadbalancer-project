@@ -119,7 +119,7 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Request diterima / detik (3 backend)",
+      "title": "Request diterima / detik (5 backend)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
       "fieldConfig": {
