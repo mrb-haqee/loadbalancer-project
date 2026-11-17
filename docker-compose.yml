@@ -1,11 +1,16 @@
 name: lb-demo
 
-# Semua backend memakai label yang sama: satu Traefik service ("demo")
-# berisi 3 server → Traefik yang membagi request (weighted round robin).
-x-backend-labels: &backend-labels
+# Label bersama: satu Traefik service "demo" berisi 3 server milik semua container.
+# Router "demo" menerima semua host (fallback) → inilah jalur load balancing,
+# termasuk untuk http://server.localhost.
+x-demo-labels: &demo-labels
   traefik.enable: "true"
   traefik.http.routers.demo.entrypoints: "web"
-  traefik.http.routers.demo.rule: "PathPrefix(`/`)"
+  traefik.http.routers.demo.rule: 'Host(`server.localhost`) || (PathPrefix(`/`) && !HostRegexp(`server-[0-9]+[.]localhost`))'
+  traefik.http.routers.demo.priority: "1"
+  # Wajib eksplisit: tiap container juga punya service "direct-N", jadi Traefik
+  # tidak bisa menebak sendiri service mana yang dipakai router "demo".
+  traefik.http.routers.demo.service: "demo"
   traefik.http.routers.demo.middlewares: "demo-retry"
   traefik.http.services.demo.loadbalancer.server.port: "3000"
   # Health check aktif ala Traefik, di samping HEALTHCHECK milik Docker.
@@ -16,39 +21,71 @@ x-backend-labels: &backend-labels
   traefik.http.middlewares.demo-retry.retry.attempts: "3"
   traefik.http.middlewares.demo-retry.retry.initialinterval: "100ms"
 
-x-backend-common: &backend-common
-  image: lb-demo-backend:latest
-  networks:
-    - lb-net
-  labels: *backend-labels
-  restart: unless-stopped
+# Label khusus tiap container: router "direct-N" yang dipatok ke satu server saja.
+# Prioritas 100 > 1, jadi host server-N.localhost tidak pernah ikut load balancing.
+x-direct-1: &direct-1
+  traefik.http.routers.direct-1.entrypoints: "web"
+  traefik.http.routers.direct-1.rule: "Host(`server-1.localhost`)"
+  traefik.http.routers.direct-1.priority: "100"
+  traefik.http.routers.direct-1.service: "direct-1"
+  traefik.http.services.direct-1.loadbalancer.server.port: "3000"
+
+x-direct-2: &direct-2
+  traefik.http.routers.direct-2.entrypoints: "web"
+  traefik.http.routers.direct-2.rule: "Host(`server-2.localhost`)"
+  traefik.http.routers.direct-2.priority: "100"
+  traefik.http.routers.direct-2.service: "direct-2"
+  traefik.http.services.direct-2.loadbalancer.server.port: "3000"
+
+x-direct-3: &direct-3
+  traefik.http.routers.direct-3.entrypoints: "web"
+  traefik.http.routers.direct-3.rule: "Host(`server-3.localhost`)"
+  traefik.http.routers.direct-3.priority: "100"
+  traefik.http.routers.direct-3.service: "direct-3"
+  traefik.http.services.direct-3.loadbalancer.server.port: "3000"
 
 services:
-  # Hanya service ini yang mem-build image; backend-2/3 memakai image yang sama.
-  backend-1:
-    <<: *backend-common
+  # Hanya service ini yang mem-build image; server-2/3 memakai image yang sama.
+  server-1:
+    image: lb-demo-backend:latest
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
     environment:
-      BACKEND_ID: backend-1
+      BACKEND_ID: server-1
+    networks:
+      - lb-net
+    labels:
+      <<: [*demo-labels, *direct-1]
+    restart: unless-stopped
 
-  backend-2:
-    <<: *backend-common
+  server-2:
+    image: lb-demo-backend:latest
     environment:
-      BACKEND_ID: backend-2
+      BACKEND_ID: server-2
+    networks:
+      - lb-net
+    labels:
+      <<: [*demo-labels, *direct-2]
+    restart: unless-stopped
 
-  backend-3:
-    <<: *backend-common
+  server-3:
+    image: lb-demo-backend:latest
     environment:
-      BACKEND_ID: backend-3
+      BACKEND_ID: server-3
+    networks:
+      - lb-net
+    labels:
+      <<: [*demo-labels, *direct-3]
+    restart: unless-stopped
 
   traefik:
     image: traefik:latest
     command:
       - "--configFile=/etc/traefik/traefik.yml"
     ports:
-      - "8088:80"    # trafik aplikasi
+      - "80:80"      # URL bersih: http://server.localhost & http://server-N.localhost
+      - "8088:80"    # cadangan kalau port 80 dipakai aplikasi lain
       - "8089:8080"  # dashboard + API Traefik
     volumes:
       - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro

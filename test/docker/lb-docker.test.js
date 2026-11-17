@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DASHBOARD_URL,
+  LB_HOST_URL,
   LB_URL,
+  directUrl,
   dockerAvailable,
   down,
   request,
@@ -13,7 +15,7 @@ import {
   waitFor,
 } from './helpers/docker-stack.js';
 
-const BACKENDS = ['backend-1', 'backend-2', 'backend-3'];
+const SERVERS = ['server-1', 'server-2', 'server-3'];
 
 function countBy(results) {
   const counts = {};
@@ -22,7 +24,7 @@ function countBy(results) {
 }
 
 test(
-  'varian container: Traefik 3 backend',
+  'varian container: Traefik 3 server + URL sendiri per server',
   {
     timeout: 600000,
     skip: dockerAvailable() ? false : 'Docker daemon tidak berjalan (nyalakan Docker Desktop)',
@@ -31,57 +33,82 @@ test(
     await up({ rebuild: true });
     t.after(() => down());
 
-    await t.test('smoke: 3 container sehat, Traefik mendaftarkan 3 server, dashboard hidup', async () => {
+    await t.test('smoke: 3 container sehat, dashboard hidup, 4 URL menjawab', async () => {
       const list = services();
-      for (const name of BACKENDS) {
+      for (const name of SERVERS) {
         const svc = list.find((entry) => entry.Service === name);
         assert.ok(svc, `${name} harus ada di compose ps`);
         assert.equal(svc.State, 'running', `${name} harus running`);
         assert.equal(svc.Health, 'healthy', `${name} harus healthy`);
       }
 
-      const lb = await request('/halo?dari=test');
-      assert.equal(lb.status, 200);
-      assert.ok(BACKENDS.includes(lb.servedBy), `x-served-by tidak valid: ${lb.servedBy}`);
-      assert.equal(lb.body.servedBy, lb.servedBy);
-      assert.equal(lb.body.query.dari, 'test');
+      // URL load balancer tanpa port.
+      const viaHost = await request('/halo?dari=host');
+      assert.equal(viaHost.status, 200);
+      assert.ok(SERVERS.includes(viaHost.servedBy), `x-served-by tidak valid: ${viaHost.servedBy}`);
+      assert.equal(viaHost.body.query.dari, 'host');
 
-      // API Traefik: bukti ketiga server benar-benar terdaftar di satu service.
+      // Cadangan lewat port 8088.
+      const viaPort = await request('/halo', { base: LB_URL });
+      assert.equal(viaPort.status, 200);
+
+      // URL masing-masing server: harus selalu server itu, bukan hasil load balancing.
+      for (const name of SERVERS) {
+        const res = await request('/siapa-kamu', { base: directUrl(name) });
+        assert.equal(res.status, 200, `${directUrl(name)} harus 200`);
+        assert.equal(res.body.servedBy, name, `${directUrl(name)} harus dilayani ${name}`);
+        assert.equal(res.servedBy, name);
+      }
+
+      // Traefik: 1 service load balance (3 server) + 3 service langsung (1 server).
       const api = await request('/api/http/services', { base: DASHBOARD_URL });
-      assert.equal(api.status, 200);
       const demo = api.body.find((svc) => String(svc.name).startsWith('demo@'));
-      assert.ok(demo, 'service demo@docker harus ada');
-      assert.equal(demo.loadBalancer.servers.length, 3, 'service harus berisi 3 server');
+      assert.equal(demo.loadBalancer.servers.length, 3, 'service demo harus berisi 3 server');
 
       const routers = await request('/api/http/routers', { base: DASHBOARD_URL });
-      assert.ok(
-        routers.body.some((router) => String(router.name).startsWith('demo@') && router.status === 'enabled'),
-        'router demo harus enabled',
-      );
+      for (const name of SERVERS) {
+        const routeName = `direct-${name.split('-')[1]}`;
+        const router = routers.body.find((entry) => String(entry.name).startsWith(`${routeName}@`));
+        assert.ok(router, `router ${routeName} harus ada`);
+        assert.equal(router.status, 'enabled');
+        const svc = api.body.find((entry) => String(entry.name).startsWith(`${routeName}@`));
+        assert.equal(svc.loadBalancer.servers.length, 1, `${routeName} harus dipatok ke 1 server`);
+      }
 
       const dashboard = await request('/dashboard/', { base: DASHBOARD_URL });
       assert.equal(dashboard.status, 200);
       assert.match(dashboard.text, /traefik/i);
     });
 
-    await t.test('round robin: 30 request terbagi rata ke 3 container', async () => {
+    await t.test('round robin: 30 request ke server.localhost terbagi rata', async () => {
       const results = [];
       for (let i = 0; i < 30; i += 1) {
         const res = await request(`/pilih?i=${i}`);
         assert.equal(res.status, 200);
-        assert.ok(res.servedBy, 'setiap response harus punya x-served-by');
         results.push(res);
       }
 
       const counts = countBy(results);
-      assert.equal(Object.keys(counts).length, 3, `harus dilayani 3 backend, dapat: ${JSON.stringify(counts)}`);
-      for (const name of BACKENDS) {
+      assert.equal(Object.keys(counts).length, 3, `harus dilayani 3 server, dapat: ${JSON.stringify(counts)}`);
+      for (const name of SERVERS) {
         assert.ok(counts[name] >= 5 && counts[name] <= 15, `porsi ${name} tidak wajar: ${JSON.stringify(counts)}`);
       }
-      t.diagnostic(`sebaran 30 request: ${JSON.stringify(counts)}`);
+      t.diagnostic(`sebaran 30 request via ${LB_HOST_URL}: ${JSON.stringify(counts)}`);
     });
 
-    await t.test('beban: 300 request / 20 konkuren, nol gagal', async () => {
+    await t.test('URL per server tidak ikut load balancing (6x tetap server yang sama)', async () => {
+      for (const name of SERVERS) {
+        const seen = [];
+        for (let i = 0; i < 6; i += 1) {
+          const res = await request(`/pinned?i=${i}`, { base: directUrl(name) });
+          assert.equal(res.status, 200);
+          seen.push(res.servedBy);
+        }
+        assert.deepEqual(seen, Array(6).fill(name), `${directUrl(name)} tidak konsisten: ${seen.join(',')}`);
+      }
+    });
+
+    await t.test('beban: 300 request / 20 konkuren ke server.localhost, nol gagal', async () => {
       const total = 300;
       const concurrency = 20;
       let next = 0;
@@ -102,21 +129,14 @@ test(
 
       const failed = results.filter((res) => res.status !== 200);
       assert.equal(failed.length, 0, `${failed.length} request gagal`);
-      const counts = countBy(results);
-      assert.equal(Object.keys(counts).length, 3, `semua backend harus kebagian: ${JSON.stringify(counts)}`);
+      assert.equal(Object.keys(countBy(results)).length, 3);
       t.diagnostic(`300 request dalam ${durationMs}ms (±${Math.round((total / durationMs) * 1000)} req/detik)`);
     });
 
-    await t.test('failover: container dimatikan → request tetap 200, keluar rotasi, pulih saat dihidupkan', async () => {
-      let stopError = null;
-      try {
-        stopService('backend-2');
-      } catch (error) {
-        stopError = error;
-      }
-      assert.equal(stopError, null, `gagal stop backend-2: ${stopError?.message ?? ''}`);
+    await t.test('failover: server-2 mati → LB tetap 200, URL server-2 tidak menipu', async () => {
+      stopService('server-2');
 
-      // Jendela sebelum Traefik menyadari: retry middleware harus menyelamatkan request.
+      // Jendela sebelum Traefik menyadari: retry middleware menyelamatkan request.
       const duringWindow = [];
       for (let i = 0; i < 12; i += 1) duringWindow.push(await request(`/saat-mati?i=${i}`));
       assert.ok(
@@ -130,24 +150,36 @@ test(
           const demo = api.body.find((svc) => String(svc.name).startsWith('demo@'));
           return demo?.loadBalancer?.servers?.length === 2;
         },
-        { label: 'Traefik menurunkan backend-2 menjadi 2 server', timeoutMs: 40000 },
+        { label: 'Traefik menurunkan server-2 (tinggal 2 server)', timeoutMs: 40000 },
       );
 
+      // URL LB tetap jalan, hanya 2 server.
       const afterDown = [];
       for (let i = 0; i < 20; i += 1) afterDown.push(await request(`/setelah-mati?i=${i}`));
       assert.ok(afterDown.every((res) => res.status === 200));
-      assert.ok(afterDown.every((res) => res.servedBy !== 'backend-2'));
+      assert.deepEqual(Object.keys(countBy(afterDown)).sort(), ['server-1', 'server-3']);
 
-      const countsDown = countBy(afterDown);
-      assert.deepEqual(Object.keys(countsDown).sort(), ['backend-1', 'backend-3']);
-
-      startService('backend-2');
+      // URL server-2 harus gagal (tidak jatuh ke load balancer / server lain).
       await waitFor(
         async () => {
-          const res = await request('/pulih');
-          return res.status === 200 && res.servedBy === 'backend-2';
+          const res = await request('/masih-hidup?', { base: directUrl('server-2') });
+          return res.status >= 400;
         },
-        { label: 'backend-2 kembali masuk rotasi', timeoutMs: 40000 },
+        { label: 'URL server-2 menolak saat server-nya mati', timeoutMs: 40000 },
+      );
+
+      // URL server-1 tetap menunjuk server-1.
+      const pinnedStillOk = await request('/cek', { base: directUrl('server-1') });
+      assert.equal(pinnedStillOk.status, 200);
+      assert.equal(pinnedStillOk.servedBy, 'server-1');
+
+      startService('server-2');
+      await waitFor(
+        async () => {
+          const res = await request('/pulih', { base: directUrl('server-2') });
+          return res.status === 200 && res.servedBy === 'server-2';
+        },
+        { label: 'URL server-2 hidup lagi', timeoutMs: 40000 },
       );
 
       const api = await request('/api/http/services', { base: DASHBOARD_URL });
@@ -155,6 +187,6 @@ test(
       assert.equal(demo.loadBalancer.servers.length, 3, 'server harus kembali berjumlah 3');
     });
 
-    t.diagnostic(`stack: ${LB_URL} (dashboard ${DASHBOARD_URL})`);
+    t.diagnostic(`URL: ${LB_HOST_URL} · ${LB_URL} · dashboard ${DASHBOARD_URL}`);
   },
 );

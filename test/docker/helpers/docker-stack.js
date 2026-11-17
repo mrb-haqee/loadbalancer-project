@@ -7,7 +7,13 @@ const PROJECT = 'lb-demo';
 const COMPOSE_ARGS = ['compose', '-p', PROJECT, '-f', resolve(ROOT, 'docker-compose.yml')];
 
 export const LB_URL = process.env.LB_DOCKER_URL ?? 'http://127.0.0.1:8088';
+export const LB_HOST_URL = process.env.LB_HOST_URL ?? 'http://server.localhost';
 export const DASHBOARD_URL = process.env.LB_DASHBOARD_URL ?? 'http://127.0.0.1:8089';
+
+/** URL khusus satu server, mis. http://server-2.localhost */
+export function directUrl(serverId) {
+  return `http://${serverId}.localhost`;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -51,15 +57,28 @@ export async function waitFor(predicate, { timeoutMs = 30000, intervalMs = 300, 
 }
 
 export async function request(path = '/', { base = LB_URL, ...init } = {}) {
-  const res = await fetch(`${base}${path}`, init);
-  const text = await res.text();
-  let body = text;
+  const { signal, timeoutMs = 20000, ...rest } = init;
+  // Jangan pakai AbortSignal.timeout(): timer-nya unref'd, sehingga kalau fetch
+  // menggantung (mis. hostname belum siap), event loop Node bisa kosong dan
+  // proses keluar dengan "Promise resolution is still pending".
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error(`request timeout ${timeoutMs}ms: ${base}${path}`)),
+    timeoutMs,
+  );
   try {
-    body = JSON.parse(text);
-  } catch {
-    /* biarkan teks (dashboard HTML) */
+    const res = await fetch(`${base}${path}`, { ...rest, signal: signal ?? controller.signal });
+    const text = await res.text();
+    let body = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      /* biarkan teks (dashboard HTML) */
+    }
+    return { status: res.status, headers: res.headers, body, text, servedBy: res.headers.get('x-served-by') };
+  } finally {
+    clearTimeout(timer);
   }
-  return { status: res.status, headers: res.headers, body, text, servedBy: res.headers.get('x-served-by') };
 }
 
 export function services() {
@@ -79,6 +98,17 @@ export function services() {
 
 export async function up({ rebuild = true } = {}) {
   compose(['up', '-d', ...(rebuild ? ['--build'] : [])]);
+
+  // Tunggu API Traefik hidup dulu; ini penanda paling andal bahwa Traefik sudah
+  // selesai start dan port 80/8089 sudah terbuka.
+  await waitFor(
+    async () => {
+      const api = await request('/api/http/services', { base: DASHBOARD_URL });
+      return api.status === 200;
+    },
+    { label: `API Traefik di ${DASHBOARD_URL} hidup`, timeoutMs: 120000 },
+  );
+
   await waitFor(
     async () => {
       try {
@@ -92,7 +122,7 @@ export async function up({ rebuild = true } = {}) {
   );
 
   // Traefik punya throttle ~2 detik sebelum container baru masuk konfigurasi.
-  // Jangan mulai test sebelum ketiga backend benar-benar terdaftar dan UP.
+  // Jangan mulai test sebelum ketiga server benar-benar terdaftar dan UP.
   await waitFor(
     async () => {
       const api = await request('/api/http/services', { base: DASHBOARD_URL });
@@ -101,7 +131,31 @@ export async function up({ rebuild = true } = {}) {
       const statuses = Object.values(demo?.serverStatus ?? {});
       return servers.length === 3 && statuses.filter((status) => status === 'UP').length === 3;
     },
-    { label: '3 backend terdaftar dan berstatus UP di Traefik', timeoutMs: 60000 },
+    { label: '3 server terdaftar dan berstatus UP di Traefik', timeoutMs: 60000 },
+  );
+
+  // Router "demo" pernah dibuang Traefik karena ambigu (2 service per container),
+  // jadi pastikan router-nya benar-benar enabled sebelum test dimulai.
+  await waitFor(
+    async () => {
+      const routers = await request('/api/http/routers', { base: DASHBOARD_URL });
+      const demo = routers.body.find((router) => String(router.name).startsWith('demo@'));
+      return demo?.status === 'enabled';
+    },
+    { label: 'router demo@docker enabled', timeoutMs: 30000 },
+  );
+
+  // Port 80 + hostname: harus jalan tanpa menyebut port sama sekali.
+  await waitFor(
+    async () => {
+      try {
+        const res = await request('/warmup', { base: LB_HOST_URL });
+        return res.status === 200;
+      } catch {
+        return false;
+      }
+    },
+    { label: `${LB_HOST_URL} menjawab (port 80)`, timeoutMs: 30000 },
   );
 }
 

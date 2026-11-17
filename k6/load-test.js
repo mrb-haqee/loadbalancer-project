@@ -2,9 +2,10 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { recordServedBy } from './lib/backend-counters.js';
 
-// Arahkan ke varian container (8088) atau Node (8080):
-//   bun scripts/k6.js run k6/load-test.js -e BASE_URL=http://127.0.0.1:8080
-const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8088';
+// Default: URL load balancer tanpa port (port 80).
+//   bun scripts/k6.js run k6/load-test.js -e BASE_URL=http://127.0.0.1:8088
+//   bun scripts/k6.js run k6/load-test.js -e BASE_URL=http://127.0.0.1:8080   # varian Node
+const BASE_URL = __ENV.BASE_URL || 'http://server.localhost';
 const PATH = __ENV.PATH || '/halo';
 
 export const options = {

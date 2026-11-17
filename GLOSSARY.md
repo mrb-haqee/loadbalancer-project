@@ -46,6 +46,14 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Router** — Aturan di Traefik yang memutuskan sebuah request masuk ke Service mana (mis. `PathPrefix(/)`).
 
+**Host Matcher** — Bagian aturan Router yang mencocokkan nama host, mis. `Host(`server-2.localhost`). Dipakai untuk memberi tiap Server URL-nya sendiri.
+
+**Router Langsung (direct-N)** — Router berprioritas tinggi yang dipatok ke satu Server saja. Memakai URL ini berarti **melewati** pembagian beban, dan sengaja tanpa Middleware Retry supaya Server yang mati terlihat gagal, bukan dialihkan diam-diam.
+
+**Ambiguous Router** — Router yang tidak bisa ditautkan otomatis karena container pemiliknya mendefinisikan lebih dari satu Service. Traefik membuang router seperti itu (gejalanya 404); obatnya label `routers.<nama>.service`.
+
+**Batas Waktu Backend (responseHeaderTimeout)** — Lama maksimum Traefik menunggu header respons dari sebuah Server. Tanpa batas ini, request ke Server yang baru mati bisa menggantung tanpa akhir.
+
 **Service** — Kumpulan Server yang melayani jenis request yang sama di Traefik; request dibagi ke seluruh Server-nya.
 
 **Server (dalam Traefik)** — Satu container Backend yang terdaftar sebagai tujuan di dalam Service.

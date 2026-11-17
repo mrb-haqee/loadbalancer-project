@@ -11,6 +11,18 @@ Ada dua varian:
 
 Keduanya memakai backend aplikasi yang sama (`src/backend/server.js`).
 
+Pada varian container, **tiap server punya URL sendiri**:
+
+| URL | Arti |
+|---|---|
+| `http://server.localhost` | Load balancer (3 server bergiliran) |
+| `http://server-1.localhost` | Langsung ke server-1 |
+| `http://server-2.localhost` | Langsung ke server-2 |
+| `http://server-3.localhost` | Langsung ke server-3 |
+| `http://127.0.0.1:8089/dashboard/` | Dashboard Traefik |
+
+`*.localhost` resolve otomatis di OS modern — tanpa edit hosts file, tanpa admin.
+
 ## 1. Arsitektur
 
 ```
@@ -54,10 +66,10 @@ loadBalancer/
 │   ├── load-test.js              # uji beban + threshold
 │   ├── failover.js               # skenario failover (sambil backend dimatikan)
 │   └── lib/backend-counters.js   # counter per backend agar sebaran terlihat
-├── docker-compose.yml            # varian container: Traefik + 3 backend (network lb-net, port 8088/8089)
+├── docker-compose.yml            # varian container: Traefik + 3 server (network lb-net, port 80/8088/8089, URL per server)
 ├── docker/
 │   ├── backend.Dockerfile        # image backend (Node 22 alpine + HEALTHCHECK)
-│   └── traefik/traefik.yml       # konfigurasi statis Traefik (provider Docker, dashboard, access log)
+│   └── traefik/traefik.yml       # config statis Traefik (provider Docker, timeout backend, dashboard, access log)
 ├── test/
 │   ├── helpers/cluster.js        # cluster terisolasi per test (port acak, proses terpisah)
 │   ├── smoke.test.js
@@ -208,46 +220,68 @@ npm run k6             # cek versi
 
 | Perintah | Arti |
 |---|---|
-| `npm run k6:load` | 100 req/detik selama 15 detik ke **8088** (varian container) |
-| `npm run k6:failover` | 50 req/detik selama 40 detik, untuk diuji sambil mematikan backend |
+| `npm run k6:load` | 100 req/detik selama 15 detik ke `http://server.localhost` |
+| `npm run k6:failover` | 50 req/detik selama 40 detik, untuk diuji sambil mematikan server |
 
-Ganti target atau intensitas (bisa untuk varian Node di 8080):
+Ganti target atau intensitas (mis. varian Node di 8080, atau port cadangan 8088):
 
 ```bash
 bun scripts/k6.js run k6/load-test.js -e BASE_URL=http://127.0.0.1:8080 -e RATE=200 -e DURATION=20s
-bun scripts/k6.js run k6/failover.js -e BASE_URL=http://127.0.0.1:8080 -e DURATION=60s
+bun scripts/k6.js run k6/failover.js -e BASE_URL=http://127.0.0.1:8088 -e DURATION=60s
 ```
 
 Threshold yang dipakai: `http_req_failed < 1%`, `p(95) < 500ms`, `checks > 99%`. k6 keluar dengan exit code ≠ 0 bila salah satu gagal, jadi aman dipakai di CI.
 
-Hasil terukur (varian container, port 8088):
+Hasil terukur (varian container, `http://server.localhost`):
 
 ```
 # beban: 480 request / 80 req per detik
 http_req_failed: 0.00%   checks_succeeded: 100.00%
-served_backend_1: 161   served_backend_2: 159   served_backend_3: 160
+served_server_1: 160   served_server_2: 160   served_server_3: 160
 
-# failover: backend-2 dimatikan detik ke-8, dihidupkan detik ke-22
-http_reqs: 2000   http_req_failed: 0.00%   checks_succeeded: 100.00%
-served_backend_1: 830   served_backend_2: 341   served_backend_3: 829
+# failover: server-2 dimatikan detik ke-8, dihidupkan detik ke-22 (diulang 2x, hasil sama)
+http_reqs: 2001   http_req_failed: 0.04% (1 request)   checks_succeeded: 99.95%
+served_server_1: 836   served_server_2: 326   served_server_3: 838
 exit code: 0
 ```
 
-Cara membaca angka failover itu: `backend-2` hanya dapat 341 request karena ia absen ±14 detik, dan **tidak ada satu pun** request yang gagal selama absennya.
+Cara membaca angka failover itu:
 
-## 5. Varian container: Traefik + 3 container
+- `server-2` hanya dapat ±330 request karena ia absen ±14 detik dari 40 detik skenario.
+- **1 dari 2001 request gagal** (0,04%) — request yang sudah setengah jalan saat container dimatikan paksa, sehingga sudah tidak bisa diulang. Ini masih jauh di bawah ambang 1%, dan bukan 0%: saya tulis apa adanya.
+- k6 tetap exit 0 karena ambang terpenuhi.
 
-Semua dibuat dari nol di folder ini. **Tidak menyentuh project yang sudah ada**: project compose sendiri (`lb-demo`), network sendiri (`lb-net`), dan port sendiri (8088/8089), jadi `proxy`, `sanmedclinic_internal`, `shared-api`, dan container lama `traefik-traefik-1` tidak tersentuh.
+## 5. Varian container: Traefik + 3 container (tiap server punya URL sendiri)
+
+Semua dibuat dari nol di folder ini. **Tidak menyentuh project yang sudah ada**: project compose sendiri (`lb-demo`), network sendiri (`lb-net`), port sendiri (80/8088/8089), jadi `proxy`, `sanmedclinic_internal`, `shared-api`, dan container lama `traefik-traefik-1` tidak tersentuh.
 
 ```
-                        ┌───────────────────────────────────────────┐
-   Browser / curl ────▶ │  Traefik  :8088  →  container :80          │
-                        │  :8089 dashboard + API                    │
-                        │  (network: lb-net)                        │
-                        └──────┬──────────────┬──────────────┬──────┘
-                               ▼              ▼              ▼
-                        lb-demo-backend-1  -2   -3   (image sama, :3000)
+              ┌──────────────────────────────────────────────────────┐
+              │  Traefik :80  (apps)   :8089 (dashboard + API)        │
+              │  network: lb-net                                      │
+              └───┬──────────┬──────────┬───────────────┬────────────┘
+                  │          │          │               │
+   Host() router  │          │          │               │
+   ───────────────┘          │          │               │
+   server.localhost → service "demo" (3 server, wrr)    │
+   server-1.localhost → service "direct-1" (1 server) ──┘
+   server-2.localhost → service "direct-2" (1 server)
+   server-3.localhost → service "direct-3" (1 server)
 ```
+
+### URL
+
+| URL | Arti |
+|---|---|
+| `http://server.localhost/` | **Load balancer** — request dibagi bergiliran ke 3 server |
+| `http://server-1.localhost/` | **Langsung ke `server-1`** (tidak ikut load balancing) |
+| `http://server-2.localhost/` | Langsung ke `server-2` |
+| `http://server-3.localhost/` | Langsung ke `server-3` |
+| `http://127.0.0.1:8088/` | Cadangan: LB lewat port, kalau port 80 dipakai aplikasi lain |
+| `http://127.0.0.1:8089/dashboard/` | Dashboard Traefik (routers, services, status tiap server) |
+| `http://127.0.0.1:8089/api/http/services` | JSON: berapa server terdaftar & statusnya |
+
+`*.localhost` di-resolve otomatis oleh Windows/Linux/macOS modern — **tidak perlu mengedit hosts file** dan tidak perlu admin. Sudah diuji di mesin ini lewat IPv4 (`127.0.0.1`) maupun IPv6 (`::1`).
 
 ### Menjalankan
 
@@ -258,26 +292,26 @@ npm run docker:logs    # access log Traefik (siapa melayani apa)
 npm run docker:down    # berhenti + hapus container & network (image tetap)
 ```
 
-| URL | Fungsi |
-|---|---|
-| `http://127.0.0.1:8088/apa-saja` | Trafik aplikasi lewat Traefik |
-| `http://127.0.0.1:8089/dashboard/` | Dashboard Traefik (routers, services, health server) |
-| `http://127.0.0.1:8089/api/http/services` | JSON: berapa server terdaftar & statusnya |
-
 Cek cepat:
 
 ```powershell
-1..9 | % { curl.exe -s -D - -o NUL "http://127.0.0.1:8088/halo?i=$_" | Select-String 'x-served-by' }
+1..6 | % { curl.exe -s "http://server.localhost/halo?i=$_" | Select-String 'servedBy' }
+curl.exe -s http://server-2.localhost/siapa   # selalu server-2
 ```
 
-### Bagaimana Traefik tahu backend-nya
+### Bagaimana Traefik tahu servernya
 
 Semua ada di `docker-compose.yml` + `docker/traefik/traefik.yml`:
 
 - `traefik.enable=true` dan `...loadbalancer.server.port=3000` → container ikut terdaftar (yang tidak berlabel diabaikan karena `exposedByDefault: false`).
 - Ketiga container memakai **nama service yang sama** (`demo`) → Traefik menggabungkannya menjadi satu service berisi 3 server, algoritma default `wrr` (weighted round robin).
+- **Router `demo`** menangkap `Host(server.localhost)` plus semua path sebagai fallback, tapi **mengecualikan** `server-1/2/3.localhost`:
+  `Host(`server.localhost`) || (PathPrefix(`/`) && !HostRegexp(`server-[0-9]+[.]localhost`))`
+- **Router `direct-N`** (prioritas 100, mengalahkan `demo` yang prioritas 1) dipatok ke satu container saja. Karena `direct-N` tidak memakai middleware `retry`, saat server itu mati URL-nya **gagal** (bukan diam-diam dialihkan ke server lain).
+- Label `...routers.demo.service: demo` **wajib** ada: tiap container mendefinisikan dua service (`demo` dan `direct-N`), dan tanpa label ini Traefik membuang router `demo` dengan error `cannot be linked automatically with multiple Services`. Gejalanya: `server.localhost` balas 404.
 - **Health check aktif**: label `...healthcheck.path=/health` (interval 2s) + `HEALTHCHECK` di `docker/backend.Dockerfile`. Container mati/unhealthy otomatis keluar dari rotasi.
 - **Failover pasif**: middleware `retry` 3× (`initialInterval 100ms`) mengulang request bila server tidak menjawab.
+- **Batas waktu backend** di `traefik.yml`: `responseHeaderTimeout: 2s`, `dialTimeout: 2s`. Tanpa ini, request yang telanjur dikirim ke container yang baru mati **menggantung tanpa batas** (Traefik default: tanpa timeout) walau retry tersedia.
 - Access log aktif, jadi setiap request tercatat di `npm run docker:logs`.
 
 ### Testing
@@ -287,31 +321,35 @@ npm run test:docker
 ```
 
 ```
-▶ varian container: Traefik 3 backend
-  ✔ smoke: 3 container sehat, Traefik mendaftarkan 3 server, dashboard hidup
-  ✔ round robin: 30 request terbagi rata ke 3 container
-  ✔ beban: 300 request / 20 konkuren, nol gagal
-  ✔ failover: container dimatikan → request tetap 200, keluar rotasi, pulih saat dihidupkan
-ℹ pass 5 | fail 0
+▶ varian container: Traefik 3 server + URL sendiri per server
+  ✔ smoke: 3 container sehat, dashboard hidup, 4 URL menjawab
+  ✔ round robin: 30 request ke server.localhost terbagi rata
+  ✔ URL per server tidak ikut load balancing (6x tetap server yang sama)
+  ✔ beban: 300 request / 20 konkuren ke server.localhost, nol gagal
+  ✔ failover: server-2 mati → LB tetap 200, URL server-2 tidak menipu
+ℹ pass 6 | fail 0
 ```
 
 Suite ini menyalakan stack sendiri, menguji lewat HTTP seperti user sungguhan, lalu `docker compose down` di akhir. Kalau Docker Desktop mati, test otomatis **skip** dengan pesan jelas (bukan gagal).
 
 Untuk menjalankan keduanya sekaligus: `npm run test:all`.
 
-### Angka failover terukur (bukan asumsi)
+### Angka terukur (bukan asumsi)
 
-| Peristiwa | Waktu |
+| Peristiwa | Hasil |
 |---|---|
-| `docker compose stop backend-2` → hilang dari rotasi | **~1,1 detik** |
-| `docker compose start backend-2` → kembali ke rotasi | **~6,1 detik** (Docker `start-period` 5s + Traefik poll) |
-| 12 request tepat setelah container dimatikan | **12/12 sukses 200** (berkat retry) |
-| 300 request / 20 konkuren | **0 gagal**, ±739 req/detik |
-| Sebaran 30 request | `backend-1: 9, backend-2: 10, backend-3: 11` |
+| `docker compose stop server-2` → hilang dari rotasi | **~1,1 detik** |
+| `docker compose start server-2` → kembali ke rotasi | **~6,1 detik** (Docker `start-period` 5s + Traefik poll) |
+| 12 request tepat setelah server dimatikan | **12/12 sukses 200**; satu request tertahan ~4,3 s lalu tetap 200 (retry) |
+| `http://server-2.localhost` saat server-2 mati | **404** — tidak menipu dengan mengalihkan ke server lain |
+| 300 request / 20 konkuren via `server.localhost` | **0 gagal**, ±600–770 req/detik (bervariasi antar run) |
+| Sebaran 30 request | selalu 3 server kebagian, tiap server 9–11 request |
+| `npm run test:docker` diulang 3× | **6/6 lulus** setiap kali |
 
 ### Batasan varian ini
 
 - Tidak ada `/stats` dan dashboard buatan sendiri — statistik diambil dari API/dashboard Traefik.
+- `responseHeaderTimeout 2s` berarti endpoint yang sengaja lambat > 2 detik (mis. `/slow?ms=5000`) akan dipotong bila lewat Traefik. Naikkan nilainya di `docker/traefik/traefik.yml` bila perlu (lalu `docker compose restart traefik`, karena config statis hanya dibaca saat start).
 - `retry` Traefik secara default hanya untuk metode idempotent (GET/HEAD); POST tidak diulang. Bisa diubah dengan `retryNonIdempotentMethod=true` bila memang aman.
 - `docker.sock` di-mount read-only, tapi tetap memberi akses ke Docker API — hanya untuk demo lokal, jangan diekspos ke internet.
 - Dashboard `api.insecure=true` tanpa login di port 8089.
@@ -386,7 +424,11 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | `node: command not found` | Node.js belum terpasang; butuh Node 20+. |
 | Port 8080/3001-3003 masih terpakai setelah terminal di-force close | Proses anak bisa tertinggal. Bersihkan: `Get-CimInstance Win32_Process -Filter "Name='node.exe'" \| Where-Object { $_.CommandLine -like '*loadBalancer*' } \| ForEach-Object { Stop-Process -Id $_.ProcessId -Force }` |
 | `test:docker` dilewati ("Docker daemon tidak berjalan") | Nyalakan Docker Desktop, tunggu status "running", ulangi. |
-| `bind: address already in use` saat `docker:up` | Port 8088/8089 dipakai proses lain. Ubah pemetaan port di `docker-compose.yml`. |
+| `bind: address already in use` saat `docker:up` | Port 80/8088/8089 dipakai proses lain. Bebaskan port 80, atau tetap pakai `http://127.0.0.1:8088` (sudah dipetakan juga). |
+| `http://server.localhost` balas **404** | Traefik membuang router `demo` karena ambigu. Cek `docker compose -p lb-demo logs traefik \| Select-String "cannot be linked"`. Pastikan label `traefik.http.routers.demo.service: demo` ada, lalu `docker compose -p lb-demo restart traefik`. |
+| Perubahan `traefik.yml` tidak berefek | Config statis hanya dibaca saat start: `docker compose -p lb-demo restart traefik` (bind mount saja tidak cukup). |
+| `server.localhost` tidak resolve (`curl exit 7`) | Berarti tidak ada yang listen, bukan masalah DNS. Pastikan stack hidup. Bila OS benar-benar tidak resolve `*.localhost`, tambahkan `127.0.0.1 server.localhost server-1.localhost server-2.localhost server-3.localhost` ke hosts file (butuh admin). |
+| Request menggantung lama saat server dimatikan | `responseHeaderTimeout` di `traefik.yml` (2s) yang membatasi; tanpa itu request bisa menunggu tanpa batas. |
 | Dashboard Traefik kosong / service tidak muncul | Cek `npm run docker:logs`; pastikan container berstatus `healthy` (`npm run docker:ps`). |
 | Ingin bersih total (termasuk image) | `docker compose -p lb-demo down --rmi local --remove-orphans` |
 | `k6 belum terpasang` | `npm run k6:install` (butuh Bun + akses GitHub). |

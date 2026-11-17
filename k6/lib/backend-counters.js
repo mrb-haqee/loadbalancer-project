@@ -9,7 +9,8 @@ import { Counter } from 'k6/metrics';
  *
  * Mendukung dua varian:
  *   - Node      : server-1, server-2, server-3
- *   - Container : backend-1, backend-2, backend-3
+ *   - Container : server-1, server-2, server-3 (nama container ikut server-N)
+ * Prefix lama `backend-N` tetap ditampung agar skrip lama tidak pecah.
  */
 const BACKENDS = [
   'server-1',
