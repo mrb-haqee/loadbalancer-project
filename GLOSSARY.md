@@ -72,7 +72,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 ## Istilah pemantauan
 
-**Metrik** — Angka hasil pengukuran k6 (mis. `http_reqs`, `http_req_duration`), dikirim ke penyimpanan deret waktu setelah test.
+**Metrik** — Angka hasil pengukuran, mis. `http_reqs` dari k6 atau `lb_backend_requests_total` dari backend; disimpan sebagai deret waktu lalu dibaca dashboard.
 
 **Output Metrik** — Tujuan pengiriman metrik k6; di project ini `influxdb=http://influxdb:8086/k6` (statusnya deprecated di k6 v2.4.0, diganti OpenTelemetry di k6 v3).
 
@@ -80,11 +80,27 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **InfluxDB** — Database deret waktu tempat metrik k6 disimpan; di project ini versi 1.8, database `k6`, tidak dipublikasikan ke host.
 
-**Grafana** — Aplikasi dashboard yang membaca InfluxDB dan menggambar panel; di project ini port 3000.
+**Prometheus** — Database deret waktu berbasis *pull*: ia sendiri yang menembak endpoint `/metrics` secara berkala; di project ini menyimpan trafik nyata Traefik + 3 backend, retensi 7 hari, tanpa port publik.
 
-**Dashboard Terprovisi (provisioned dashboard)** — Dashboard yang dibaca Grafana dari file (`monitoring/grafana/dashboards/k6.json`) saat start, bukan dibuat manual lewat UI; perubahan lewat UI tidak disimpan karena `allowUiUpdates: false`.
+**Metrics Endpoint** — URL yang mengembalikan metrik dalam format teks Prometheus (`# HELP`, `# TYPE`, `nama{label} nilai`); di project ini `http://server-N:3000/metrics` (internal `lb-net`) dan `http://traefik:8080/metrics`.
 
-**Datasource** — Koneksi Grafana ke sumber data; di project ini `k6-influxdb` dengan uid `k6-influxdb`.
+**Scrape** — Aksi Prometheus mengambil `/metrics` dari satu target secara berkala; di project ini tiap 2 detik (`scrape_interval: 2s`).
+
+**Target** — Satu alamat yang di-scrape Prometheus; di project ini 1 target Traefik + 3 target backend, terlihat dari metrik `up` (1 = hidup, 0 = mati).
+
+**Counter** — Metrik yang hanya bisa naik (mis. `lb_backend_requests_total`); yang dibaca dashboard bukan nilainya, tapi laju kenaikannya (`rate(...)`).
+
+**Histogram** — Metrik yang mengelompokkan pengamatan ke bucket nilai (mis. `lb_backend_request_duration_seconds_bucket`), dipakai untuk menghitung kuantil tanpa menyimpan tiap sampel.
+
+**Kuantil (p95)** — Nilai yang memisahkan 95% pengamatan tercepat dari 5% terlambat; di project ini dihitung dengan `histogram_quantile(0.95, ...)`.
+
+**Dashboard Realtime** — Dashboard yang angkanya berasal dari trafik nyata (bukan hasil test), jadi tetap bergerak walau k6 tidak jalan; di project ini `lb-realtime` dengan refresh 5 detik.
+
+**Grafana** — Aplikasi dashboard yang membaca InfluxDB dan Prometheus lalu menggambar panel; di project ini port 3000 dan `http://grafana.localhost`.
+
+**Dashboard Terprovisi (provisioned dashboard)** — Dashboard yang dibaca Grafana dari file saat start, bukan dibuat manual lewat UI; perubahan lewat UI tidak disimpan karena `allowUiUpdates: false`. Dua folder: `monitoring/grafana/dashboards/k6/k6.json` dan `.../lb/lb-realtime.json`.
+
+**Datasource** — Koneksi Grafana ke sumber data; di project ini dua: `k6-influxdb` (uid `k6-influxdb`, default) dan `prometheus` (uid `prometheus`).
 
 **Web Dashboard k6** — Dashboard bawaan binary k6 yang tampil real-time selama test di port 5665 dan bisa diekspor jadi `report.html`; datanya hilang setelah test selesai, berbeda dari Grafana.
 

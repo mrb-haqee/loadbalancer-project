@@ -1,0 +1,28 @@
+# Prometheus untuk trafik NYATA (bukan hasil test k6).
+# Scrape tiap 2 detik: cukup terasa realtime tanpa noise.
+# Target ada di network lb-net; Prometheus ikut network itu + lb-k6-net (Grafana).
+
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  # Traefik mengekspor metrics Prometheus di entrypoint "traefik" (port 8080).
+  # Diperlukan agar ada angka request masuk per router/service dan status code.
+  - job_name: traefik
+    static_configs:
+      - targets: ["traefik:8080"]
+
+  # Satu target per backend: inilah "request yang benar-benar diterima server".
+  # Label server dipakai dashboard agar nama server-1/2/3 terbaca, bukan IP.
+  - job_name: backend
+    static_configs:
+      - targets: ["server-1:3000"]
+        labels:
+          server: server-1
+      - targets: ["server-2:3000"]
+        labels:
+          server: server-2
+      - targets: ["server-3:3000"]
+        labels:
+          server: server-3

@@ -16,9 +16,6 @@ const BACKENDS = [
   'server-1',
   'server-2',
   'server-3',
-  'backend-1',
-  'backend-2',
-  'backend-3',
 ];
 
 const counters = Object.fromEntries(

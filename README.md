@@ -24,7 +24,7 @@ Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diber
 | `http://server-1.localhost/` | **Langsung ke `server-1`** (tidak ikut load balancing) |
 | `http://server-2.localhost/` | Langsung ke `server-2` |
 | `http://server-3.localhost/` | Langsung ke `server-3` |
-| `http://grafana.localhost/` | **Grafana** — dashboard hasil k6 |
+| `http://grafana.localhost/` | **Grafana** — dashboard hasil k6 **dan** dashboard realtime trafik |
 | `http://traefik.localhost/dashboard/` | Dashboard Traefik (routers, services, status tiap server) |
 | `http://k6.localhost/` | Web dashboard k6 — **hanya saat `npm run k6:watch`** |
 | `http://127.0.0.1:8088/` | Cadangan: LB lewat port, kalau port 80 dipakai aplikasi lain |
@@ -76,8 +76,10 @@ loadBalancer/
 │   ├── failover.js               # skenario failover (sambil server dimatikan)
 │   └── lib/backend-counters.js   # counter per server agar sebaran terlihat
 ├── monitoring/
-│   ├── grafana/provisioning/     # datasource InfluxDB + provider dashboard
-│   ├── grafana/dashboards/       # k6.json (diprovisikan otomatis)
+│   ├── prometheus/prometheus.yml # scrape Traefik + 3 backend tiap 2 detik
+│   ├── grafana/provisioning/     # datasource InfluxDB + Prometheus, provider dashboard
+│   ├── grafana/dashboards/k6/    # k6.json (hasil test)
+│   ├── grafana/dashboards/lb/    # lb-realtime.json (trafik nyata)
 │   └── reports/                  # hasil ekspor report.html dari k6 web dashboard
 ├── GLOSSARY.md
 └── docs/adr/                     # catatan keputusan desain
@@ -220,28 +222,40 @@ Cara membaca angka failover itu:
 - **1 dari 2001 request gagal** (0,04%) — request yang sudah setengah jalan saat container dimatikan paksa, sehingga sudah tidak bisa diulang. Ini jauh di bawah ambang 1%, dan bukan 0%: saya tulis apa adanya.
 - k6 tetap exit 0 karena ambang terpenuhi.
 
-## 7. k6 di container + dashboard pemantauan
+## 7. Monitoring: k6, trafik nyata, dan Grafana
 
-Selain binary lokal di atas, k6 bisa dijalankan **dari container** dan hasilnya disimpan permanen di InfluxDB, lalu dibaca Grafana. Semuanya ada di `docker-compose.monitoring.yml` dengan project sendiri (`lb-k6`), jadi tidak mengganggu stack `lb-demo` maupun `npm test`. Grafana dan k6 ikut menempel di `lb-net`, jadi keduanya juga punya URL lewat Traefik.
+Semua ada di `docker-compose.monitoring.yml` dengan project sendiri (`lb-k6`), jadi tidak mengganggu stack `lb-demo` maupun `npm test`. Grafana dan k6 ikut menempel di `lb-net`, jadi keduanya juga punya URL lewat Traefik.
+
+Ada **dua sumber data** dengan arti berbeda:
+
+| Sumber | Isi | Dashboard |
+|---|---|---|
+| InfluxDB 1.8 | hasil **test k6** (hanya terisi saat `k6:run` / `k6:watch`) | `k6-lb` |
+| Prometheus | **trafik nyata** Traefik + 3 backend, scrape tiap 2 detik | `lb-realtime` |
 
 ```
 k6 (container) ──HTTP──> traefik:80 (server.localhost)
       │
-      └── output influxdb ──> influxdb:8086 (db `k6`) ──> grafana:3000 (dashboard k6-lb)
+      └── output influxdb ──> influxdb:8086 (db `k6`) ──┐
+                                                          ├──> grafana:3000
+traefik:8080/metrics + server-N:3000/metrics              │
+      └── scrape 2s ──> prometheus:9090 ──────────────────┘
 ```
 
 | URL | Arti |
 |---|---|
-| `http://grafana.localhost/` | **Grafana** — dashboard "k6 — Load Balancer 3 Server" (admin/admin, viewer anonim aktif) |
+| `http://grafana.localhost/` | **Grafana** (admin/admin, viewer anonim aktif). Dua dashboard: folder `k6` → `k6-lb`, folder `load-balancer` → `lb-realtime` |
+| `http://grafana.localhost/d/lb-realtime` | Langsung ke dashboard realtime |
+| `http://grafana.localhost/d/k6-lb` | Langsung ke dashboard hasil k6 |
 | `http://127.0.0.1:3000` | Cadangan: Grafana lewat port |
 | `http://k6.localhost/` | Web dashboard bawaan k6, **hanya hidup saat `npm run k6:watch`** |
 | `http://127.0.0.1:5665` | Cadangan: web dashboard k6 lewat port |
 
-InfluxDB **tidak** diekspos ke host maupun lewat Traefik — tidak punya UI dan tidak perlu.
+InfluxDB dan Prometheus **tidak** diekspos ke host maupun lewat Traefik. InfluxDB tidak punya UI; Prometheus hanya dikonsumsi Grafana.
 
 | Perintah | Arti |
 |---|---|
-| `npm run k6:up` | Nyalakan InfluxDB + Grafana (image diunduh sekali) |
+| `npm run k6:up` | Nyalakan InfluxDB + Grafana + Prometheus (image diunduh sekali) |
 | `npm run k6:run` | Jalankan k6 sekali di container, hasil masuk InfluxDB + Grafana |
 | `npm run k6:watch` | Sama, tapi dashboard web k6 hidup di `http://k6.localhost` / `http://127.0.0.1:5665` dan hasilnya diekspor ke `monitoring/reports/report.html` |
 | `npm run k6:down` | Matikan stack monitoring (data di volume tetap) |
@@ -253,10 +267,50 @@ Alur pemakaian:
 npm run stack:up       # network + traefik + backend + monitoring
 npm run k6:run         # k6 di container: 100 req/detik selama 15 detik
 # buka http://grafana.localhost → folder k6 → dashboard k6-lb
+# buka http://grafana.localhost/d/lb-realtime kapan saja (tanpa k6)
 npm run stack:down     # urutan shutdown sudah diurus script
 ```
 
 Panel dashboard: total request, request gagal, check lulus, VU maksimum, request/detik, latensi p50/p95/p99, sebaran request per server, dan status code. Ada variabel **Run** untuk memfilter satu eksekusi tertentu — tiap run diberi tag `run` berisi timestamp, jadi run lama tetap bisa dibandingkan.
+
+### 7a. Dashboard realtime `lb-realtime` (Prometheus)
+
+Dashboard ini **tidak bergantung pada k6**. Selama backend hidup, Prometheus menembak `/metrics` tiap 2 detik dan grafik diperbarui tiap 5 detik, jadi request manual dari browser pun langsung terlihat.
+
+Sumber angkanya dua, dan bedanya penting:
+
+| Metrik | Dari | Arti |
+|---|---|---|
+| `traefik_entrypoint_requests_total` | Traefik | request yang **masuk** ke Traefik (termasuk yang nanti gagal) |
+| `lb_backend_requests_total` | tiap backend | request yang **benar-benar diterima** server |
+| `lb_backend_request_duration_seconds` | tiap backend | histogram durasi, dipakai untuk p95 |
+| `up{job=...}` | Prometheus | target scrape hidup atau mati |
+
+Panel (10):
+
+| Panel | Query inti |
+|---|---|
+| Request masuk / detik | `sum(rate(traefik_entrypoint_requests_total{protocol="http"}[30s]))` |
+| Request diterima / detik | `sum(rate(lb_backend_requests_total[30s]))` |
+| Error 5xx / detik | `rate(...{code=~"5.."}[1m])` |
+| Backend sehat | `sum(up{job="backend"})` (0–3) |
+| Masuk vs diterima (grafik) | dua rate di atas, satu grafik |
+| Diterima per server | `sum by (server) (rate(lb_backend_requests_total[30s]))` |
+| Masuk per service | `sum by (service) (rate(traefik_service_requests_total[30s]))` |
+| Status code | `sum by (code) (rate(...))` |
+| Latensi p95 per server | `histogram_quantile(0.95, sum by (server, le) (rate(lb_backend_request_duration_seconds_bucket[1m])))` |
+| Status target scrape | `up{job=~"backend\|traefik"}` → UP/DOWN per target |
+
+Selisih "masuk" dan "diterima" itu normal dan bukan bug: health check Traefik (`/health`) tidak dihitung backend, sementara `/metrics` dan `/health` sengaja dikecualikan dari counter backend agar angkanya tidak tercemar probe 2 detik.
+
+Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/server.js`), berisi counter `lb_backend_requests_total`, `lb_backend_slow_requests_total`, dan histogram `lb_backend_request_duration_seconds`. Bisa dicek langsung:
+
+```bash
+curl http://server-1.localhost/metrics
+```
+
+Konfigurasi scrape ada di `monitoring/prometheus/prometheus.yml` (job `traefik` + satu target per backend, label `server`). Datasource Grafana-nya uid `prometheus` (`monitoring/grafana/provisioning/datasources/prometheus.yml`).
+
 
 Ganti intensitas atau skenario (env var diteruskan ke container lewat `-e`):
 
@@ -292,6 +346,8 @@ report.html (k6:watch): 167 KB
 | `grafana.localhost` / `traefik.localhost` setelah dipisah | **200**, tidak nyasar ke backend (router prioritas 200 menang atas fallback `demo` prioritas 1) |
 | `k6.localhost` saat `npm run k6:watch` | **200** selama run, router hilang ~6 detik setelah k6 selesai |
 | `npm run stack:up` dijalankan ulang | **idempotent**: "network lb-net sudah ada", container yang sudah hidup tidak dibuat ulang |
+| Dashboard `lb-realtime` saat backend hidup | 10 panel berisi data; scrape 4 target (`traefik` + 3 backend) `up=1` |
+| 30 request manual ke `server.localhost` | masuk 14,48 req/detik, diterima 13,89 req/detik, per server 4,3 / 4,7 / 4,9, p95 ±4,7 ms |
 
 ## 9. Batasan (sengaja, karena ini project demo/pembelajaran)
 
@@ -301,9 +357,12 @@ report.html (k6:watch): 167 KB
 - Belum ada TLS, autentikasi, sticky session, rate limiting, atau circuit breaker.
 - Backend tidak menyimpan state; request berikutnya bisa dilayani server lain.
 - `docker.sock` di-mount read-only, tapi tetap memberi akses ke Docker API — hanya untuk demo lokal, jangan diekspos ke internet.
-- Dashboard `api.insecure=true` tanpa login di port 8089 **dan** di `http://traefik.localhost/dashboard/`.
+- Dashboard `api.insecure=true` tanpa login di port 8089 **dan** di `http://traefik.localhost/dashboard/`. Endpoint `/metrics` Traefik juga ikut terbuka di sana (port 8080 tidak dipublikasikan, tapi 8089 memuat API yang sama).
 - Grafana memakai kredensial default `admin/admin` dan viewer anonim; InfluxDB tanpa autentikasi dan tidak dipublikasikan ke host. Hanya untuk lokal.
-- Data monitoring disimpan di volume Docker (`influxdb-data`); `npm run k6:down` tidak menghapusnya, `... down -v` menghapusnya.
+- Prometheus tanpa autentikasi dan tanpa port publik — hanya bisa diakses dari network `lb-net` / `lb-k6-net`. Retensi 7 hari.
+- Data monitoring disimpan di volume Docker (`influxdb-data`, `prometheus-data`); `npm run k6:down` tidak menghapusnya, `... down -v` menghapusnya.
+- Metrik backend disimpan di memori proses: counter kembali 0 setiap container backend dibuat ulang, dan Prometheus ikut melihatnya sebagai reset (rate tetap benar, angka total tidak).
+- Scrape 2 detik berarti puncak trafik yang lebih pendek dari 2 detik bisa terlewat. Ini kompromi "cukup realtime" vs beban scrape.
 - `npm test` hanya mematikan `lb-demo`; Traefik dibiarkan hidup. Kalau ingin benar-benar bersih, jalankan `npm run stack:down`.
 - Network `lb-net` dibuat di luar compose, jadi `docker network prune` bisa menghapusnya saat semua container mati; pulihkan dengan `npm run net:up`.
 
@@ -324,7 +383,10 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | `k6 belum terpasang` | `npm run k6:install` (butuh Bun + akses GitHub). |
 | `k6:install` gagal HTTP 403 | Rate limit GitHub API; tunggu beberapa menit atau unduh manual rilis k6. |
 | Grafana kosong / "No data" | Pastikan sudah ada run: `npm run k6:run`. Cek datasource: `http://grafana.localhost/api/datasources` harus berisi `k6-influxdb`. Cek data: `docker compose -p lb-k6 -f docker-compose.monitoring.yml exec -T influxdb influx -database k6 -execute 'SHOW MEASUREMENTS'`. |
-| Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `npm run k6:logs`. |
+| Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards/k6` dan `.../lb`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `npm run k6:logs`. |
+| `lb-realtime` kosong / "No data" | Datasource `prometheus` belum ada atau Prometheus mati. Cek `http://grafana.localhost/api/datasources` (harus ada uid `prometheus`), lalu `npm run k6:up`. |
+| Panel "Status target scrape" merah (DOWN) | Target tidak bisa di-scrape. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml logs prometheus`. Penyebab umum: backend mati, atau Prometheus tidak menempel di `lb-net` (`npm run k6:down && npm run k6:up`). |
+| Metrik `traefik_*` tidak ada di Prometheus | `metrics.prometheus` di `docker/traefik/traefik.yml` hanya dibaca saat start: `npm run traefik:down && npm run traefik:up`. Verifikasi: `curl http://127.0.0.1:8089/metrics \| Select-String traefik_entrypoint_requests_total`. |
 | `k6` di container gagal resolve `server.localhost` | Alias network hanya aktif kalau traefik dibuat ulang setelah `docker-compose.traefik.yml` diubah: `npm run traefik:down && npm run traefik:up`. Cek: `docker run --rm --network lb-net alpine:3 nslookup server.localhost`. |
 | `docker compose` gagal: `network lb-net declared as external, but could not be found` | Network belum dibuat: `npm run net:up`. |
 | `grafana.localhost` balas JSON backend | Label router Grafana hilang atau prioritasnya tidak lebih tinggi dari `demo` (harus 200). Cek `http://127.0.0.1:8089/api/http/routers` dan pastikan `grafana@docker` berstatus `enabled`. |

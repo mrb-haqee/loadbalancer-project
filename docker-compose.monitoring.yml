@@ -2,11 +2,31 @@ name: lb-k6
 
 # Stack monitoring TERPISAH dari stack load balancer (project `lb-demo`).
 # - `lb-net` dipakai sebagai network external supaya k6 bisa menembak
-#   `http://server.localhost` (Traefik) — lihat alias di docker-compose.yml.
-# - `lb-k6-net` hanya untuk InfluxDB ↔ Grafana ↔ k6.
+#   `http://server.localhost` (Traefik) — lihat alias di docker-compose.traefik.yml.
+# - `lb-k6-net` untuk InfluxDB ↔ Grafana ↔ k6 ↔ Prometheus (internal saja).
 # Jadi `docker compose -p lb-demo down` tidak ikut mematikan dashboard.
+#
+# Dua sumber data, dua dashboard:
+# - InfluxDB 1.8  → hasil test k6 (dashboard `k6-lb`)
+# - Prometheus    → trafik nyata dari Traefik + 3 backend (dashboard `lb-realtime`)
 
 services:
+  # Prometheus menyimpan angka trafik nyata (Traefik + 3 backend).
+  # Sengaja tidak dipublikasikan ke host dan tidak dirutekan lewat Traefik:
+  # satu-satunya konsumennya Grafana.
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - lb-k6-net
+      - lb-net
+    restart: unless-stopped
+
   influxdb:
     image: influxdb:1.8
     environment:
@@ -34,7 +54,7 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/k6.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/k6/k6.json
     ports:
       - "3000:3000"
     volumes:
@@ -94,6 +114,7 @@ services:
 volumes:
   influxdb-data:
   grafana-data:
+  prometheus-data:
 
 networks:
   lb-k6-net:

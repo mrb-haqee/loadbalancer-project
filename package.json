@@ -16,7 +16,7 @@
     "docker:down": "docker compose -p lb-demo down --remove-orphans",
     "docker:ps": "docker compose -p lb-demo ps",
     "docker:logs": "docker compose -p lb-demo logs --tail=80",
-    "k6:up": "docker compose -p lb-k6 -f docker-compose.monitoring.yml up -d influxdb grafana",
+    "k6:up": "docker compose -p lb-k6 -f docker-compose.monitoring.yml up -d influxdb grafana prometheus",
     "k6:run": "docker compose -p lb-k6 -f docker-compose.monitoring.yml run --rm k6",
     "k6:watch": "docker compose -p lb-k6 -f docker-compose.monitoring.yml run --rm --service-ports -e K6_WEB_DASHBOARD=true k6",
     "k6:down": "docker compose -p lb-k6 -f docker-compose.monitoring.yml down --remove-orphans",

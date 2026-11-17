@@ -26,6 +26,14 @@ const startedAt = Date.now();
 let requestCount = 0;
 let slowRequestCount = 0;
 
+// Histogram durasi request untuk /metrics (format Prometheus).
+// Health check dan /metrics sendiri tidak dihitung agar angkanya tidak tercemar
+// probe 2 detik milik Traefik.
+const DURATION_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5];
+const durationBucketCounts = new Array(DURATION_BUCKETS.length).fill(0);
+let durationSum = 0;
+let durationCount = 0;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function sendJson(res, statusCode, payload, extraHeaders = {}) {
@@ -49,6 +57,17 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? self.host}`);
+  const startedAtNs = process.hrtime.bigint();
+
+  res.on('finish', () => {
+    if (url.pathname === '/health' || url.pathname === '/metrics') return;
+    const seconds = Number(process.hrtime.bigint() - startedAtNs) / 1e9;
+    durationSum += seconds;
+    durationCount += 1;
+    for (let i = 0; i < DURATION_BUCKETS.length; i += 1) {
+      if (seconds <= DURATION_BUCKETS[i]) durationBucketCounts[i] += 1;
+    }
+  });
 
   // Health endpoint: sengaja tidak dihitung sebagai trafik aplikasi.
   if (url.pathname === '/health') {
@@ -60,6 +79,36 @@ const server = http.createServer(async (req, res) => {
       uptimeMs: Date.now() - startedAt,
       requestCount,
     });
+  }
+
+  // Endpoint metrics Prometheus: juga tidak dihitung sebagai trafik aplikasi.
+  // Format teks polos, tanpa dependency. Hanya diakses dari network lb-net.
+  if (url.pathname === '/metrics') {
+    const labels = `server="${self.id}"`;
+    const histogram = DURATION_BUCKETS.map(
+      (le, index) =>
+        `lb_backend_request_duration_seconds_bucket{${labels},le="${le}"} ${durationBucketCounts[index]}`,
+    );
+    histogram.push(`lb_backend_request_duration_seconds_bucket{${labels},le="+Inf"} ${durationCount}`);
+    const body = [
+      '# HELP lb_backend_requests_total Total request aplikasi yang diterima backend ini.',
+      '# TYPE lb_backend_requests_total counter',
+      `lb_backend_requests_total{${labels}} ${requestCount}`,
+      '# HELP lb_backend_slow_requests_total Total request ke /slow.',
+      '# TYPE lb_backend_slow_requests_total counter',
+      `lb_backend_slow_requests_total{${labels}} ${slowRequestCount}`,
+      '# HELP lb_backend_request_duration_seconds Durasi request yang dilayani (detik).',
+      '# TYPE lb_backend_request_duration_seconds histogram',
+      ...histogram,
+      `lb_backend_request_duration_seconds_sum{${labels}} ${durationSum}`,
+      `lb_backend_request_duration_seconds_count{${labels}} ${durationCount}`,
+      '',
+    ].join('\n');
+    res.writeHead(200, {
+      'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+      'content-length': Buffer.byteLength(body),
+    });
+    return res.end(body);
   }
 
   requestCount += 1;

@@ -25,6 +25,18 @@ providers:
     network: "lb-net"
     watch: true
 
+# Metrik Prometheus: dibaca Prometheus (project lb-k6) lewat entrypoint
+# "traefik" (port 8080, sama dengan API). Tanpa ini tidak ada angka request
+# per router/service untuk dashboard realtime.
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+    # Bucket latensi dibuat lebih rapat dari default agar p95 berguna di demo
+    # (default 0.1/0.3/1.2/5 detik terlalu kasar untuk respons < 50 ms).
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+
 log:
   level: INFO
 

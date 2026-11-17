@@ -1,0 +1,14 @@
+apiVersion: 1
+
+# Dashboard trafik nyata (Prometheus) dipisah dari dashboard hasil test k6
+# (InfluxDB) supaya tidak ada panel kosong yang membingungkan.
+providers:
+  - name: lb
+    orgId: 1
+    folder: load-balancer
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards/lb
