@@ -314,7 +314,7 @@ Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/ser
 curl http://server-1.localhost/metrics
 ```
 
-Daftar backend **tidak ditulis** di `monitoring/prometheus/prometheus.yml`. Prometheus menemukan sendiri container backend lewat Docker API (`docker_sd_configs`): hanya container berlabel `lb.monitor=true` (ada di `x-demo-labels`, jadi otomatis ikut semua server), difilter ke network `lb-net`, dan label `server` diambil dari nama service compose. Tambah `server-5` di compose → target Prometheus muncul sendiri.
+Daftar backend **tidak ditulis** di `monitoring/prometheus/prometheus.yml`. Prometheus menemukan sendiri container backend lewat Docker API (`docker_sd_configs`): hanya container berlabel `lb.monitor=true` (ada di `x-main-labels`, jadi otomatis ikut semua server), difilter ke network `lb-net`, dan label `server` diambil dari nama service compose. Tambah `server-5` di compose → target Prometheus muncul sendiri.
 
 Socket Docker di-mount **read-only** ke Prometheus hanya untuk penemuan target. Karena socket hanya bisa dibaca root, container Prometheus berjalan sebagai root (`user: "0:0"`) — jangan diekspos ke host.
 
@@ -422,7 +422,7 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards/k6` dan `.../lb`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `npm run k6:logs`. |
 | `lb-realtime` kosong / "No data" | Datasource `prometheus` belum ada atau Prometheus mati. Cek `http://grafana.localhost/api/datasources` (harus ada uid `prometheus`), lalu `npm run k6:up`. |
 | Panel "Status target scrape" merah (DOWN) | Target tidak bisa di-scrape. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml logs prometheus`. Penyebab umum: backend mati, atau Prometheus tidak menempel di `lb-net` (`npm run k6:down && npm run k6:up`). |
-| Target backend baru tidak muncul di Prometheus | Container tidak punya label `lb.monitor=true` (cek `docker inspect <container> --format '{{index .Config.Labels "lb.monitor"}}'`) — label ini ada di `x-demo-labels`, jadi server baru otomatis dapat. Kalau log Prometheus berisi `permission denied ... docker.sock`, pastikan mount socket read-only dan `user: "0:0"` masih ada, lalu recreate Prometheus. |
+| Target backend baru tidak muncul di Prometheus | Container tidak punya label `lb.monitor=true` (cek `docker inspect <container> --format '{{index .Config.Labels "lb.monitor"}}'`) — label ini ada di `x-main-labels`, jadi server baru otomatis dapat. Kalau log Prometheus berisi `permission denied ... docker.sock`, pastikan mount socket read-only dan `user: "0:0"` masih ada, lalu recreate Prometheus. |
 | Panel sebaran k6 kosong untuk semua server | Panel baru membaca metric `served` (tag `server`). Run lama memakai `served_server_N` dan tidak tampil. Jalankan Run baru lewat link "Run k6". |
 | Metrik `traefik_*` tidak ada di Prometheus | `metrics.prometheus` di `docker/traefik/traefik.yml` hanya dibaca saat start: `npm run traefik:down && npm run traefik:up`. Verifikasi: `curl http://127.0.0.1:8089/metrics \| Select-String traefik_entrypoint_requests_total`. |
 | `k6` di container gagal resolve `server.localhost` | Alias network hanya aktif kalau traefik dibuat ulang setelah `docker-compose.traefik.yml` diubah: `npm run traefik:down && npm run traefik:up`. Cek: `docker run --rm --network lb-net alpine:3 nslookup server.localhost`. |

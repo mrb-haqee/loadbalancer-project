@@ -31,7 +31,7 @@ Memilih **(1)**, hanya untuk monitoring. `docker-compose.yml` tetap eksplisit pe
 
 Detail:
 
-- `x-demo-labels` mendapat `lb.monitor: "true"`, jadi semua backend (termasuk yang ditambah nanti) otomatis ikut dipantau.
+- `x-main-labels` mendapat `lb.monitor: "true"`, jadi semua backend (termasuk yang ditambah nanti) otomatis ikut dipantau.
 - Job `backend` Prometheus memakai `docker_sd_configs` (socket Docker read-only), filter label + network `lb-net`, alamat `IP:3000`, label `server` dari `com.docker.compose.service`.
 - `k6/lib/backend-counters.js` menjadi satu `Counter('served')`; `recordServedBy` menambahkan tag `server`.
 - Panel "Sebaran request per server" menjadi satu query: `SELECT sum("value") FROM "served" ... GROUP BY "server"`.

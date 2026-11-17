@@ -2,7 +2,7 @@
 # Scrape tiap 2 detik: cukup terasa realtime tanpa noise.
 # Target backend DITEMUKAN OTOMATIS lewat Docker, jadi menambah server tidak
 # perlu menyunting file ini. Hanya container berlabel `lb.monitor=true`
-# (lihat x-demo-labels di docker-compose.yml) yang ikut di-scrape.
+# (lihat x-main-labels di docker-compose.yml) yang ikut di-scrape.
 
 global:
   scrape_interval: 2s

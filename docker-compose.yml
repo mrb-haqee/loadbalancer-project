@@ -3,7 +3,7 @@ name: lb-demo
 # Label bersama: satu Traefik service "demo" berisi 3 server milik semua container.
 # Router "demo" menerima semua host (fallback) → inilah jalur load balancing,
 # termasuk untuk http://server.localhost.
-x-demo-labels: &demo-labels
+x-main-labels: &main-labels
   traefik.enable: "true"
   # Ditembak Prometheus lewat docker_sd: hanya container berlabel ini yang
   # di-scrape sebagai backend. Tidak perlu mendaftar target secara manual.
@@ -73,7 +73,7 @@ services:
     networks:
       - lb-net
     labels:
-      <<: [*demo-labels, *direct-1]
+      <<: [*main-labels, *direct-1]
     restart: unless-stopped
 
   server-2:
@@ -83,7 +83,7 @@ services:
     networks:
       - lb-net
     labels:
-      <<: [*demo-labels, *direct-2]
+      <<: [*main-labels, *direct-2]
     restart: unless-stopped
 
   server-3:
@@ -93,7 +93,7 @@ services:
     networks:
       - lb-net
     labels:
-      <<: [*demo-labels, *direct-3]
+      <<: [*main-labels, *direct-3]
     restart: unless-stopped
 
   server-4:
@@ -103,7 +103,7 @@ services:
     networks:
       - lb-net
     labels:
-      <<: [*demo-labels, *direct-4]
+      <<: [*main-labels, *direct-4]
     restart: unless-stopped
     
   server-5:
@@ -113,7 +113,7 @@ services:
     networks:
       - lb-net
     labels:
-      <<: [*demo-labels, *direct-5]
+      <<: [*main-labels, *direct-5]
     restart: unless-stopped
 
 # Network terisolasi: tidak menyentuh network project lain
