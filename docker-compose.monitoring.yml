@@ -16,12 +16,18 @@ services:
   # satu-satunya konsumennya Grafana.
   prometheus:
     image: prom/prometheus:latest
+    # Image resmi berjalan sebagai `nobody`; socket Docker hanya bisa dibaca
+    # root. Ini satu-satunya alasan root dipakai, dan socket-nya read-only.
+    user: "0:0"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=7d"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+      # Read-only: hanya untuk menemukan container backend (docker_sd_configs).
+      # Prometheus tidak bisa membuat/mengubah container.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - lb-k6-net
       - lb-net
@@ -74,6 +80,33 @@ services:
     networks:
       - lb-k6-net
       - lb-net
+    restart: unless-stopped
+
+  # Pemicu Run dari dashboard Grafana: satu klik di link "Run k6".
+  # Tidak memakai Docker socket; k6 dijalankan langsung di container ini.
+  # GET /cgi-bin/trigger -> mulai satu Run, hasil masuk InfluxDB.
+  k6-runner:
+    build:
+      context: .
+      dockerfile: docker/k6-runner.Dockerfile
+    environment:
+      K6_OUT: influxdb=http://influxdb:8086/k6
+      RATE: "100"
+      DURATION: "15s"
+    volumes:
+      - ./k6:/scripts:ro
+    networks:
+      - lb-k6-net
+      - lb-net
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.k6-trigger.entrypoints: "web"
+      traefik.http.routers.k6-trigger.rule: "Host(`trigger.localhost`)"
+      traefik.http.routers.k6-trigger.priority: "200"
+      traefik.http.services.k6-trigger.loadbalancer.server.port: "8080"
+    depends_on:
+      influxdb:
+        condition: service_healthy
     restart: unless-stopped
 
   # k6 tidak ikut `up`; dijalankan sekali pakai:

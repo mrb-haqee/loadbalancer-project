@@ -7,12 +7,16 @@ Panduan menambah `server-4` (berlaku sama untuk server-5, server-6, dst).
 | File | Perubahan | Kenapa |
 |---|---|---|
 | `docker-compose.yml` | tambah anchor `x-direct-N` + service `server-N` | container baru + router langsungnya |
-| `monitoring/prometheus/prometheus.yml` | tambah satu target `server-N:3000` | agar metrik server baru masuk dashboard |
 | `test/docker/lb-docker.test.js` | `SERVERS`, jumlah server, batas round robin | test mematok angka 3 |
 | `test/docker/helpers/docker-stack.js` | `servers.length === 3` → `=== 4` | test menunggu 3 server UP |
 | `README.md`, `GLOSSARY.md`, `package.json` | sebutan "3 server" (opsional tapi disarankan) | dokumentasi tidak bohong |
 
-Yang **tidak** perlu diubah: `docker-compose.traefik.yml`, `docker/traefik/traefik.yml`, dashboard Grafana, skrip k6.
+Yang **tidak** perlu diubah: `docker-compose.traefik.yml`, `docker/traefik/traefik.yml`, `monitoring/prometheus/prometheus.yml`, dashboard `lb-realtime`, `monitoring/grafana/dashboards/k6/k6.json`, `k6/lib/backend-counters.js`.
+
+Monitoring **tidak punya daftar server**:
+
+- Prometheus menemukan backend lewat `docker_sd_configs` (label `lb.monitor=true`, network `lb-net`), label `server` diambil dari nama service compose.
+- k6 mencatat sebaran di satu metric `served` dengan tag `server`; panel Grafana-nya satu query `GROUP BY "server"`.
 
 ## 1. `docker-compose.yml`
 
@@ -49,21 +53,27 @@ Kenapa cuma ini:
 
 Tidak perlu `build:` — image `lb-demo-backend:latest` sudah ada. Kalau ingin build ulang: `npm run docker:up`.
 
-## 2. `monitoring/prometheus/prometheus.yml`
+## 2. Monitoring: tidak ada yang perlu diubah
 
-```yaml
-      - targets: ["server-4:3000"]
-        labels:
-          server: server-4
-```
+Begitu service baru jalan, keduanya otomatis:
 
-Lalu muat ulang config (container restart membaca ulang file yang di-mount):
+| Komponen | Mekanisme |
+|---|---|
+| Prometheus | `docker_sd_configs` menemukan container berlabel `lb.monitor=true` (label ada di `x-demo-labels`), filter network `lb-net`, alamat `IP:3000`, label `server` dari nama service compose |
+| Dashboard `lb-realtime` | query `sum by (server)`, garis baru muncul sendiri |
+| k6 + panel sebaran | satu metric `served` dengan tag `server`; panel `GROUP BY "server"` |
+
+Verifikasi target tanpa menyentuh config:
 
 ```bash
-docker compose -p lb-k6 -f docker-compose.monitoring.yml restart prometheus
+curl -s "http://grafana.localhost/api/datasources/proxy/uid/prometheus/api/v1/query?query=up%7Bjob%3D%22backend%22%7D"
 ```
 
-Dashboard `lb-realtime` tidak perlu diubah: semua query memakai `sum by (server)`, jadi garis keempat muncul sendiri. Panel "Backend sehat" juga ikut naik (target 4), tapi ambang hijaunya masih 3 — cukup, tidak wajib diubah.
+Kalau `server-N` tidak muncul:
+
+- Pastikan container punya label: `docker inspect lb-demo-server-N-1 --format '{{index .Config.Labels "lb.monitor"}}'` → `true`.
+- Pastikan container ada di network `lb-net`.
+- Kalau log Prometheus berisi `permission denied ... docker.sock`, mount socket read-only atau `user: "0:0"` hilang — recreate Prometheus.
 
 ## 3. Test suite
 
@@ -100,7 +110,9 @@ curl -s http://127.0.0.1:8089/api/http/services     # demo@docker harus 4 server
 npm test                                            # harus lulus semua
 ```
 
-Cek dashboard: `http://grafana.localhost/d/lb-realtime` — panel "Request diterima per server" harus punya 4 garis, "Backend sehat" = 4.
+Cek dashboard: `http://grafana.localhost/d/lb-realtime` - panel "Request diterima per server" harus punya 4 garis, "Backend sehat" = 4.
+
+Cek dashboard k6: klik link "Run k6" di `http://grafana.localhost/d/k6-lb`, lalu panel "Sebaran request per server" harus berisi `server-4` (±375 request untuk run 15 detik 100 req/detik).
 
 Cek scrape:
 
@@ -110,6 +122,8 @@ curl -s "http://grafana.localhost/api/datasources/proxy/uid/prometheus/api/v1/qu
 
 ## Jebakan
 
+- **Label `lb.monitor` hilang** → Prometheus tidak menemukan container itu: panel `lb-realtime` tetap 3 server walau container hidup. Label ada di `x-demo-labels`; kalau service baru tidak memakai anchor itu, tambahkan manual.
+- **Prometheus `permission denied` membaca `docker.sock`** → target backend tidak ditemukan sama sekali. Mount socket harus read-only dan service tetap `user: "0:0"`.
 - **Lupa `x-direct-4`** → `server-4.localhost` 404, padahal pool sudah berisi 4 server. Gejala: LB jalan, URL langsung tidak.
 - **Lupa label `server: server-4`** di Prometheus → grafik bertambah tapi legend jadi `server-4:3000` (IP/instance), bukan `server-4`.
 - **Tidak restart Prometheus** → target baru tidak pernah muncul walau file sudah diubah.

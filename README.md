@@ -231,7 +231,7 @@ Ada **dua sumber data** dengan arti berbeda:
 | Sumber | Isi | Dashboard |
 |---|---|---|
 | InfluxDB 1.8 | hasil **test k6** (hanya terisi saat `k6:run` / `k6:watch`) | `k6-lb` |
-| Prometheus | **trafik nyata** Traefik + 3 backend, scrape tiap 2 detik | `lb-realtime` |
+| Prometheus | **trafik nyata** Traefik + semua backend (ditemukan otomatis lewat Docker), scrape tiap 2 detik | `lb-realtime` |
 
 ```
 k6 (container) ──HTTP──> traefik:80 (server.localhost)
@@ -250,12 +250,13 @@ traefik:8080/metrics + server-N:3000/metrics              │
 | `http://127.0.0.1:3000` | Cadangan: Grafana lewat port |
 | `http://k6.localhost/` | Web dashboard bawaan k6, **hanya hidup saat `npm run k6:watch`** |
 | `http://127.0.0.1:5665` | Cadangan: web dashboard k6 lewat port |
+| `http://trigger.localhost/cgi-bin/trigger` | Pemicu Run k6 dari browser (dipakai link "Run k6" di dashboard) |
 
 InfluxDB dan Prometheus **tidak** diekspos ke host maupun lewat Traefik. InfluxDB tidak punya UI; Prometheus hanya dikonsumsi Grafana.
 
 | Perintah | Arti |
 |---|---|
-| `npm run k6:up` | Nyalakan InfluxDB + Grafana + Prometheus (image diunduh sekali) |
+| `npm run k6:up` | Nyalakan InfluxDB + Grafana + Prometheus + runner pemicu (image diunduh/di-build sekali) |
 | `npm run k6:run` | Jalankan k6 sekali di container, hasil masuk InfluxDB + Grafana |
 | `npm run k6:watch` | Sama, tapi dashboard web k6 hidup di `http://k6.localhost` / `http://127.0.0.1:5665` dan hasilnya diekspor ke `monitoring/reports/report.html` |
 | `npm run k6:down` | Matikan stack monitoring (data di volume tetap) |
@@ -272,6 +273,8 @@ npm run stack:down     # urutan shutdown sudah diurus script
 ```
 
 Panel dashboard: total request, request gagal, check lulus, VU maksimum, request/detik, latensi p50/p95/p99, sebaran request per server, dan status code. Ada variabel **Run** untuk memfilter satu eksekusi tertentu — tiap run diberi tag `run` berisi timestamp, jadi run lama tetap bisa dibandingkan.
+
+Sebaran per server memakai satu metric `served` dengan tag `server` (bukan satu metric per server), dan panelnya satu query `GROUP BY "server"`. Jadi server baru otomatis muncul tanpa menyunting skrip k6 atau dashboard. Konsekuensinya, ringkasan konsol k6 hanya menampilkan total `served`, bukan per server.
 
 ### 7a. Dashboard realtime `lb-realtime` (Prometheus)
 
@@ -293,13 +296,13 @@ Panel (10):
 | Request masuk / detik | `sum(rate(traefik_entrypoint_requests_total{protocol="http"}[30s]))` |
 | Request diterima / detik | `sum(rate(lb_backend_requests_total[30s]))` |
 | Error 5xx / detik | `rate(...{code=~"5.."}[1m])` |
-| Backend sehat | `sum(up{job="backend"})` (0–3) |
+| Backend sehat | `sum(max by (server) (up{job="backend"}))` (0 sampai jumlah backend) |
 | Masuk vs diterima (grafik) | dua rate di atas, satu grafik |
 | Diterima per server | `sum by (server) (rate(lb_backend_requests_total[30s]))` |
 | Masuk per service | `sum by (service) (rate(traefik_service_requests_total[30s]))` |
 | Status code | `sum by (code) (rate(...))` |
 | Latensi p95 per server | `histogram_quantile(0.95, sum by (server, le) (rate(lb_backend_request_duration_seconds_bucket[1m])))` |
-| Status target scrape | `up{job=~"backend\|traefik"}` → UP/DOWN per target |
+| Status target scrape | `max by (job, server) (up{job=~"backend\|traefik"})` → UP/DOWN per target |
 
 Selisih "masuk" dan "diterima" itu normal dan bukan bug: health check Traefik (`/health`) tidak dihitung backend, sementara `/metrics` dan `/health` sengaja dikecualikan dari counter backend agar angkanya tidak tercemar probe 2 detik.
 
@@ -309,8 +312,11 @@ Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/ser
 curl http://server-1.localhost/metrics
 ```
 
-Konfigurasi scrape ada di `monitoring/prometheus/prometheus.yml` (job `traefik` + satu target per backend, label `server`). Datasource Grafana-nya uid `prometheus` (`monitoring/grafana/provisioning/datasources/prometheus.yml`).
+Daftar backend **tidak ditulis** di `monitoring/prometheus/prometheus.yml`. Prometheus menemukan sendiri container backend lewat Docker API (`docker_sd_configs`): hanya container berlabel `lb.monitor=true` (ada di `x-demo-labels`, jadi otomatis ikut semua server), difilter ke network `lb-net`, dan label `server` diambil dari nama service compose. Tambah `server-5` di compose → target Prometheus muncul sendiri.
 
+Socket Docker di-mount **read-only** ke Prometheus hanya untuk penemuan target. Karena socket hanya bisa dibaca root, container Prometheus berjalan sebagai root (`user: "0:0"`) — jangan diekspos ke host.
+
+Datasource Grafana-nya uid `prometheus` (`monitoring/grafana/provisioning/datasources/prometheus.yml`).
 
 Ganti intensitas atau skenario (env var diteruskan ke container lewat `-e`):
 
@@ -324,13 +330,33 @@ Catatan jujur soal versi: k6 v2.4.0 menandai output `influxdb` (dan `experimenta
 Hasil terukur dari container (`npm run k6:run`, 15 detik, 100 req/detik):
 
 ```
-http_reqs: 1501   100.96/detik
+http_reqs: 1500   99.99/detik
 http_req_failed: 0.00%   checks_succeeded: 100.00%
-served_server_1: 500   served_server_2: 500   served_server_3: 501
+served: 1500 (total; rincian per server di Grafana)
+  server-1 375 · server-2 375 · server-3 375 · server-4 375
 report.html (k6:watch): 167 KB
 ```
 
 `k6:watch` menahan proses selama tab browser dashboard masih terbuka — tutup tab (atau tekan Ctrl+C) kalau run sudah selesai.
+
+### 7b. Memicu k6 dari Grafana
+
+Grafana tidak bisa menjalankan perintah sendiri (tidak ada plugin self-hosted untuk itu, dan endpoint Actions tidak tersedia di 13.3.1). Yang dipakai: **link dashboard** yang memanggil service kecil `k6-runner`.
+
+- Di dashboard `k6-lb`, pojok kanan atas ada link **"Run k6 (15 detik)"**.
+- Klik → browser membuka `http://trigger.localhost/cgi-bin/trigger` → satu Run k6 dimulai → halaman redirect ke dashboard setelah 2 detik → panel terisi.
+- Parameter tetap: 100 req/detik, 15 detik, skrip `load-test.js`. Hasil masuk InfluxDB dengan tag `run` baru, jadi bisa dibandingkan dengan run sebelumnya lewat variabel **Run**.
+- Hanya **satu Run pada satu waktu**. Klik kedua saat masih berjalan dibalas halaman "Run masih berjalan", bukan antrean.
+- Log run: `docker exec lb-k6-k6-runner-1 tail -20 /tmp/k6-run.log`.
+
+Kenapa begini:
+
+- `k6-runner` menjalankan binary k6 langsung di container-nya (image alpine + binary dari image k6). **Tidak** memakai Docker socket — runner tidak bisa membuat/mematikan container lain.
+- Container hanya bisa diakses lewat `trigger.localhost` (Traefik, prioritas 200); port 8080 tidak dipublikasikan ke host.
+- Endpoint ini **tanpa autentikasi**. Siapa pun yang bisa membuka `trigger.localhost` bisa memulai Run; guard-nya cuma single-flight. Untuk lokal aman, jangan diekspos ke internet tanpa auth.
+- Ganti intensitas: ubah `RATE` / `DURATION` di service `k6-runner` (`docker-compose.monitoring.yml`), lalu `docker compose -p lb-k6 -f docker-compose.monitoring.yml up -d k6-runner`.
+
+Alternatif tanpa Grafana tetap ada: `npm run k6:run` (sekali) dan `npm run k6:watch` (plus web dashboard k6 + `report.html`).
 
 ## 8. Angka terukur (bukan asumsi)
 
@@ -348,6 +374,8 @@ report.html (k6:watch): 167 KB
 | `npm run stack:up` dijalankan ulang | **idempotent**: "network lb-net sudah ada", container yang sudah hidup tidak dibuat ulang |
 | Dashboard `lb-realtime` saat backend hidup | 10 panel berisi data; scrape 4 target (`traefik` + 3 backend) `up=1` |
 | 30 request manual ke `server.localhost` | masuk 14,48 req/detik, diterima 13,89 req/detik, per server 4,3 / 4,7 / 4,9, p95 ±4,7 ms |
+| Klik "Run k6" di dashboard Grafana | trigger 200 → Run 15 detik selesai (1500 request) → tag `run` baru muncul di InfluxDB; klik kedua saat run berjalan dibalas halaman "Run masih berjalan" |
+| Tambah `server-4` di compose saja | Prometheus menemukan target `server-4` otomatis (`up=1`), panel `lb-realtime` dan sebaran k6 bertambah tanpa menyunting config monitoring |
 
 ## 9. Batasan (sengaja, karena ini project demo/pembelajaran)
 
@@ -363,6 +391,10 @@ report.html (k6:watch): 167 KB
 - Data monitoring disimpan di volume Docker (`influxdb-data`, `prometheus-data`); `npm run k6:down` tidak menghapusnya, `... down -v` menghapusnya.
 - Metrik backend disimpan di memori proses: counter kembali 0 setiap container backend dibuat ulang, dan Prometheus ikut melihatnya sebagai reset (rate tetap benar, angka total tidak).
 - Scrape 2 detik berarti puncak trafik yang lebih pendek dari 2 detik bisa terlewat. Ini kompromi "cukup realtime" vs beban scrape.
+- Pemicu `trigger.localhost` tanpa autentikasi dan hanya menjaga single-flight: siapa pun yang bisa membuka host itu (termasuk viewer anonim Grafana) bisa memulai Run. Parameter Run juga tetap, tidak bisa diubah dari UI.
+- Runner memegang binary k6 dan menjalankan tepat satu Run per klik; tidak ada antrean, tidak ada riwayat status selain tag `run` di InfluxDB dan `/tmp/k6-run.log` di dalam container.
+- Prometheus memegang `docker.sock` read-only dan berjalan sebagai root hanya untuk penemuan target. Container tanpa label `lb.monitor=true` tidak akan dipantau, walau ada di `lb-net`.
+- Riwayat k6 terputus sekali: run sebelum metric `served` diperkenalkan memakai `served_server_N` dan tidak lagi tampil di panel sebaran. Run baru memakai `served` + tag `server`.
 - `npm test` hanya mematikan `lb-demo`; Traefik dibiarkan hidup. Kalau ingin benar-benar bersih, jalankan `npm run stack:down`.
 - Network `lb-net` dibuat di luar compose, jadi `docker network prune` bisa menghapusnya saat semua container mati; pulihkan dengan `npm run net:up`.
 
@@ -386,10 +418,15 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards/k6` dan `.../lb`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `npm run k6:logs`. |
 | `lb-realtime` kosong / "No data" | Datasource `prometheus` belum ada atau Prometheus mati. Cek `http://grafana.localhost/api/datasources` (harus ada uid `prometheus`), lalu `npm run k6:up`. |
 | Panel "Status target scrape" merah (DOWN) | Target tidak bisa di-scrape. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml logs prometheus`. Penyebab umum: backend mati, atau Prometheus tidak menempel di `lb-net` (`npm run k6:down && npm run k6:up`). |
+| Target backend baru tidak muncul di Prometheus | Container tidak punya label `lb.monitor=true` (cek `docker inspect <container> --format '{{index .Config.Labels "lb.monitor"}}'`) — label ini ada di `x-demo-labels`, jadi server baru otomatis dapat. Kalau log Prometheus berisi `permission denied ... docker.sock`, pastikan mount socket read-only dan `user: "0:0"` masih ada, lalu recreate Prometheus. |
+| Panel sebaran k6 kosong untuk semua server | Panel baru membaca metric `served` (tag `server`). Run lama memakai `served_server_N` dan tidak tampil. Jalankan Run baru lewat link "Run k6". |
 | Metrik `traefik_*` tidak ada di Prometheus | `metrics.prometheus` di `docker/traefik/traefik.yml` hanya dibaca saat start: `npm run traefik:down && npm run traefik:up`. Verifikasi: `curl http://127.0.0.1:8089/metrics \| Select-String traefik_entrypoint_requests_total`. |
 | `k6` di container gagal resolve `server.localhost` | Alias network hanya aktif kalau traefik dibuat ulang setelah `docker-compose.traefik.yml` diubah: `npm run traefik:down && npm run traefik:up`. Cek: `docker run --rm --network lb-net alpine:3 nslookup server.localhost`. |
 | `docker compose` gagal: `network lb-net declared as external, but could not be found` | Network belum dibuat: `npm run net:up`. |
 | `grafana.localhost` balas JSON backend | Label router Grafana hilang atau prioritasnya tidak lebih tinggi dari `demo` (harus 200). Cek `http://127.0.0.1:8089/api/http/routers` dan pastikan `grafana@docker` berstatus `enabled`. |
 | `k6.localhost` balas 404 | Normal kalau k6 tidak sedang jalan — router hanya ada selama `npm run k6:watch`. |
+| Link "Run k6" di Grafana tidak berefek / `trigger.localhost` 404 | `k6-runner` belum jalan: `npm run k6:up`. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml ps k6-runner` dan log container-nya. |
+| Klik "Run k6" tapi dashboard tidak terisi | Lihat log run: `docker exec lb-k6-k6-runner-1 tail -30 /tmp/k6-run.log`. Cek `K6_OUT` menunjuk `http://influxdb:8086/k6` dan runner ada di network `lb-k6-net` + `lb-net`. |
+| Klik "Run k6" dibalas "Run masih berjalan" padahal tidak ada run | Lock tertinggal setelah runner mati di tengah run: `docker exec lb-k6-k6-runner-1 rmdir /tmp/k6.lock` (atau restart container). |
 | `k6:watch` tidak bisa dibuka di 5665 | `docker compose run` tidak mempublikasikan port kecuali `--service-ports` — script sudah memakainya. Pastikan port 5665 bebas. |
 | `report.html` tidak dibuat | k6 melewati ekspor bila run terlalu pendek ("not enough data"): butuh durasi > 3× `K6_WEB_DASHBOARD_PERIOD` (di sini 2s → minimal ~6s). |

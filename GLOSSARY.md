@@ -86,7 +86,13 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Scrape** — Aksi Prometheus mengambil `/metrics` dari satu target secara berkala; di project ini tiap 2 detik (`scrape_interval: 2s`).
 
-**Target** — Satu alamat yang di-scrape Prometheus; di project ini 1 target Traefik + 3 target backend, terlihat dari metrik `up` (1 = hidup, 0 = mati).
+**Target** — Satu alamat yang di-scrape Prometheus; di project ini 1 target Traefik + satu target per backend (ditemukan otomatis, bukan didaftar manual), terlihat dari metrik `up` (1 = hidup, 0 = mati).
+
+**Service Discovery (`docker_sd`)** — Cara Prometheus menemukan target sendiri dengan menanyakan Docker API, bukan dari daftar di `prometheus.yml`; dipakai untuk backend di project ini lewat socket read-only.
+
+**Label Monitoring (`lb.monitor=true`)** — Label Docker pada container backend yang menandakan "ikut dipantau Prometheus"; tanpa label ini container tidak akan ditemukan walaupun ada di network yang sama.
+
+**Tag Metrik** — Pasangan key/value yang menempel pada satu sampel metrik (di project ini `server` pada metric `served` milik k6), sehingga satu metric bisa dipecah per server dengan `GROUP BY` tanpa membuat metric baru tiap server.
 
 **Counter** — Metrik yang hanya bisa naik (mis. `lb_backend_requests_total`); yang dibaca dashboard bukan nilainya, tapi laju kenaikannya (`rate(...)`).
 
@@ -95,6 +101,10 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 **Kuantil (p95)** — Nilai yang memisahkan 95% pengamatan tercepat dari 5% terlambat; di project ini dihitung dengan `histogram_quantile(0.95, ...)`.
 
 **Dashboard Realtime** — Dashboard yang angkanya berasal dari trafik nyata (bukan hasil test), jadi tetap bergerak walau k6 tidak jalan; di project ini `lb-realtime` dengan refresh 5 detik.
+
+**Trigger** — Aksi memulai satu Run dari luar (di project ini: klik link di dashboard Grafana yang memanggil `http://trigger.localhost/cgi-bin/trigger`). Trigger bukan Run; satu Trigger menghasilkan satu Run.
+
+**Runner** — Service kecil pemegang binary k6 yang menerima Trigger dan menjalankan Run; di project ini container `k6-runner`. Runner sengaja tidak punya akses ke Docker socket dan hanya melayani satu Run pada satu waktu (single-flight).
 
 **Grafana** — Aplikasi dashboard yang membaca InfluxDB dan Prometheus lalu menggambar panel; di project ini port 3000 dan `http://grafana.localhost`.
 

@@ -5,6 +5,9 @@ name: lb-demo
 # termasuk untuk http://server.localhost.
 x-demo-labels: &demo-labels
   traefik.enable: "true"
+  # Ditembak Prometheus lewat docker_sd: hanya container berlabel ini yang
+  # di-scrape sebagai backend. Tidak perlu mendaftar target secara manual.
+  lb.monitor: "true"
   traefik.http.routers.demo.entrypoints: "web"
   traefik.http.routers.demo.rule: 'Host(`server.localhost`) || (PathPrefix(`/`) && !HostRegexp(`server-[0-9]+[.]localhost`))'
   traefik.http.routers.demo.priority: "1"

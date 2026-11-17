@@ -1,0 +1,33 @@
+#!/bin/sh
+# CGI pemicu: dipanggil dari link "Run k6" di dashboard Grafana.
+# Satu Run pada satu waktu (lock direktori bersifat atomik di filesystem).
+# Hasil Run masuk ke InfluxDB lewat K6_OUT, sama seperti `npm run k6:run`.
+
+set -u
+
+lock=/tmp/k6.lock
+log=/tmp/k6-run.log
+
+reply() {
+  # $1 = isi HTML, $2 = URL redirect opsional
+  printf 'Content-Type: text/html; charset=utf-8\r\n'
+  if [ -n "${2:-}" ]; then printf 'Refresh: 2; url=%s\r\n' "$2"; fi
+  printf '\r\n%s\n' "$1"
+}
+
+if ! mkdir "$lock" 2>/dev/null; then
+  reply '<h1>Run masih berjalan</h1><p>Tunggu sampai selesai, lalu klik lagi. <a href="http://grafana.localhost/d/k6-lb">Buka dashboard</a></p>'
+  exit 0
+fi
+
+# stdout/stderr subshell dialihkan: kalau tidak, httpd menunggu pipe CGI tetap
+# terbuka sampai k6 selesai dan halaman trigger tidak pernah tampil.
+# Log k6 sendiri tetap ditulis ke $log.
+(
+  cd /scripts || exit 1
+  k6 run load-test.js >"$log" 2>&1
+  echo "$?" >/tmp/k6-last-status
+  rmdir "$lock"
+) >/dev/null 2>&1 &
+
+reply '<h1>Run dimulai</h1><p>Dashboard k6 terbuka otomatis. Satu Run berjalan sekitar 15 detik.</p>' 'http://grafana.localhost/d/k6-lb'

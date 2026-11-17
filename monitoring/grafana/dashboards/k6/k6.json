@@ -7,6 +7,18 @@
   "version": 1,
   "refresh": "5s",
   "time": { "from": "now-30m", "to": "now" },
+  "links": [
+    {
+      "title": "Run k6 (15 detik)",
+      "url": "http://trigger.localhost/cgi-bin/trigger",
+      "icon": "external link",
+      "type": "link",
+      "targetBlank": true,
+      "includeVars": false,
+      "keepTime": false,
+      "tooltip": "Mulai satu Run k6 (100 req/detik, 15 detik). Hasil masuk dashboard ini."
+    }
+  ],
   "templating": {
     "list": [
       {
@@ -246,22 +258,8 @@
           "refId": "A",
           "rawQuery": true,
           "resultFormat": "time_series",
-          "alias": "server-1",
-          "query": "SELECT sum(\"value\") FROM \"served_server_1\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
-        },
-        {
-          "refId": "B",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "server-2",
-          "query": "SELECT sum(\"value\") FROM \"served_server_2\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
-        },
-        {
-          "refId": "C",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "server-3",
-          "query": "SELECT sum(\"value\") FROM \"served_server_3\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+          "alias": "$tag_server",
+          "query": "SELECT sum(\"value\") FROM \"served\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY \"server\""
         }
       ]
     },

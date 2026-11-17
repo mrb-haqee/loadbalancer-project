@@ -1,6 +1,8 @@
 # Prometheus untuk trafik NYATA (bukan hasil test k6).
 # Scrape tiap 2 detik: cukup terasa realtime tanpa noise.
-# Target ada di network lb-net; Prometheus ikut network itu + lb-k6-net (Grafana).
+# Target backend DITEMUKAN OTOMATIS lewat Docker, jadi menambah server tidak
+# perlu menyunting file ini. Hanya container berlabel `lb.monitor=true`
+# (lihat x-demo-labels di docker-compose.yml) yang ikut di-scrape.
 
 global:
   scrape_interval: 2s
@@ -13,19 +15,25 @@ scrape_configs:
     static_configs:
       - targets: ["traefik:8080"]
 
-  # Satu target per backend: inilah "request yang benar-benar diterima server".
-  # Label server dipakai dashboard agar nama server-1/2/3 terbaca, bukan IP.
+  # Satu target per container backend, ditemukan lewat Docker API (socket
+  # read-only). Label `server` diambil dari nama service compose, jadi
+  # dashboard tetap menampilkan server-1/2/3/... bukan IP.
   - job_name: backend
-    static_configs:
-      - targets: ["server-1:3000"]
-        labels:
-          server: server-1
-      - targets: ["server-2:3000"]
-        labels:
-          server: server-2
-      - targets: ["server-3:3000"]
-        labels:
-          server: server-3
-      - targets: ["server-4:3000"]
-        labels:
-          server: server-4
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        filters:
+          - name: label
+            values: ["lb.monitor=true"]
+    relabel_configs:
+      # Container boleh punya beberapa network; hanya ambil lb-net.
+      - source_labels: [__meta_docker_network_name]
+        regex: ^lb-net$
+        action: keep
+      # Port backend selalu 3000 (docker/backend.Dockerfile), jadi tidak perlu
+      # menebak dari port yang dipublikasikan.
+      - source_labels: [__meta_docker_network_ip]
+        target_label: __address__
+        replacement: $1:3000
+      # Nama server = nama service di compose (server-1, server-4, ...).
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: server

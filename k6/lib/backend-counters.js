@@ -1,29 +1,20 @@
 import { Counter } from 'k6/metrics';
 
 /**
- * Counter eksplisit per backend, dipakai bersama oleh semua skrip k6.
+ * Satu counter untuk semua backend, dibedakan lewat tag `server`.
  *
- * Catatan: di k6 v2.4 tag pada custom metric tidak muncul sebagai sub-metric
- * di ringkasan, jadi tiap backend dibuatkan metric sendiri agar sebarannya
- * terlihat jelas di output.
+ * Dulu dibuat satu Counter per server (`served_server_1`, ...), sehingga
+ * menambah server berarti menyunting file ini DAN dashboard Grafana.
+ * Dengan tag, k6 tidak perlu tahu ada berapa server: apa pun yang muncul di
+ * header `X-Served-By` otomatis tercatat sebagai tag InfluxDB.
  *
- * Mendukung dua varian:
- *   - Node      : server-1, server-2, server-3
- *   - Container : server-1, server-2, server-3 (nama container ikut server-N)
- * Prefix lama `backend-N` tetap ditampung agar skrip lama tidak pecah.
+ * Catatan: tag tidak muncul sebagai baris terpisah di ringkasan konsol k6,
+ * tetapi tersimpan sebagai tag InfluxDB dan bisa di-GROUP BY di dashboard.
  */
-const BACKENDS = [
-  'server-1',
-  'server-2',
-  'server-3',
-];
-
-const counters = Object.fromEntries(
-  BACKENDS.map((name) => [name, new Counter(`served_${name.replace(/-/g, '_')}`)]),
-);
+const served = new Counter('served');
 
 export function recordServedBy(server) {
-  const counter = counters[server];
-  if (counter) counter.add(1);
-  return Boolean(counter);
+  if (!server) return false;
+  served.add(1, { server });
+  return true;
 }

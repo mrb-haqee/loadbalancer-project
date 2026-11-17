@@ -147,7 +147,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(up{job=\"backend\"})",
+          "expr": "sum(max by (server) (up{job=\"backend\"}))",
           "instant": true,
           "range": false,
           "legendFormat": "up"
@@ -329,7 +329,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "up{job=~\"backend|traefik\"}",
+          "expr": "max by (job, server) (up{job=~\"backend|traefik\"})",
           "instant": true,
           "range": false,
           "legendFormat": "{{job}} {{server}} {{instance}}"
