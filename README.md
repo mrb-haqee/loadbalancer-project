@@ -289,10 +289,12 @@ Sumber angkanya dua, dan bedanya penting:
 | `lb_backend_request_duration_seconds` | tiap backend | histogram durasi, dipakai untuk p95 |
 | `up{job=...}` | Prometheus | target scrape hidup atau mati |
 
-Panel (10):
+Panel (12):
 
 | Panel | Query inti |
 |---|---|
+| Total request berhasil (2xx) | `sum(increase(traefik_entrypoint_requests_total{code=~"2.."}[$__range]))` |
+| Total request error (4xx + 5xx) | `sum(increase(...{code=~"4..\|5.."}[$__range]))` |
 | Request masuk / detik | `sum(rate(traefik_entrypoint_requests_total{protocol="http"}[30s]))` |
 | Request diterima / detik | `sum(rate(lb_backend_requests_total[30s]))` |
 | Error 5xx / detik | `rate(...{code=~"5.."}[1m])` |
@@ -376,6 +378,7 @@ Alternatif tanpa Grafana tetap ada: `npm run k6:run` (sekali) dan `npm run k6:wa
 | 30 request manual ke `server.localhost` | masuk 14,48 req/detik, diterima 13,89 req/detik, per server 4,3 / 4,7 / 4,9, p95 ±4,7 ms |
 | Klik "Run k6" di dashboard Grafana | trigger 200 → Run 15 detik selesai (1500 request) → tag `run` baru muncul di InfluxDB; klik kedua saat run berjalan dibalas halaman "Run masih berjalan" |
 | Tambah `server-4` di compose saja | Prometheus menemukan target `server-4` otomatis (`up=1`), panel `lb-realtime` dan sebaran k6 bertambah tanpa menyunting config monitoring |
+| Panel total `lb-realtime` (range 15m) | berhasil 16.997 · error 19; setelah 3 request 404 (server-2 dimatikan) error naik ke 22 |
 
 ## 9. Batasan (sengaja, karena ini project demo/pembelajaran)
 
@@ -395,6 +398,7 @@ Alternatif tanpa Grafana tetap ada: `npm run k6:run` (sekali) dan `npm run k6:wa
 - Runner memegang binary k6 dan menjalankan tepat satu Run per klik; tidak ada antrean, tidak ada riwayat status selain tag `run` di InfluxDB dan `/tmp/k6-run.log` di dalam container.
 - Prometheus memegang `docker.sock` read-only dan berjalan sebagai root hanya untuk penemuan target. Container tanpa label `lb.monitor=true` tidak akan dipantau, walau ada di `lb-net`.
 - Riwayat k6 terputus sekali: run sebelum metric `served` diperkenalkan memakai `served_server_N` dan tidak lagi tampil di panel sebaran. Run baru memakai `served` + tag `server`.
+- Panel total (`2xx`, `4xx+5xx`) memakai `increase(...[$__range])`, jadi angkanya ikut rentang waktu dashboard, bukan total seumur hidup. Counter Traefik reset saat container Traefik dibuat ulang.
 - `npm test` hanya mematikan `lb-demo`; Traefik dibiarkan hidup. Kalau ingin benar-benar bersih, jalankan `npm run stack:down`.
 - Network `lb-net` dibuat di luar compose, jadi `docker network prune` bisa menghapusnya saat semua container mati; pulihkan dengan `npm run net:up`.
 

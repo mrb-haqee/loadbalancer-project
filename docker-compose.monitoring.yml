@@ -91,7 +91,7 @@ services:
       dockerfile: docker/k6-runner.Dockerfile
     environment:
       K6_OUT: influxdb=http://influxdb:8086/k6
-      RATE: "100"
+      RATE: "1000"
       DURATION: "15s"
     volumes:
       - ./k6:/scripts:ro

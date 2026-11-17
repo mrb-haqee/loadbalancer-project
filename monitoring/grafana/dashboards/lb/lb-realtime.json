@@ -10,6 +10,80 @@
   "templating": { "list": [] },
   "panels": [
     {
+      "id": 11,
+      "type": "stat",
+      "title": "Total request berhasil (2xx)",
+      "description": "Jumlah request 2xx sepanjang rentang waktu dashboard, bukan per detik.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(traefik_entrypoint_requests_total{protocol=\"http\",code=~\"2..\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "2xx"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Total request error (4xx + 5xx)",
+      "description": "Jumlah request 4xx dan 5xx sepanjang rentang waktu dashboard, bukan per detik.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(traefik_entrypoint_requests_total{protocol=\"http\",code=~\"4..|5..\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "4xx+5xx"
+        }
+      ]
+    },
+    {
       "id": 1,
       "type": "stat",
       "title": "Request masuk / detik (Traefik)",
@@ -159,7 +233,7 @@
       "type": "timeseries",
       "title": "Request masuk (Traefik) vs diterima (backend)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
@@ -191,7 +265,7 @@
       "type": "timeseries",
       "title": "Request diterima per server",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
@@ -217,7 +291,7 @@
       "type": "timeseries",
       "title": "Request masuk per service (Traefik)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
@@ -243,7 +317,7 @@
       "type": "timeseries",
       "title": "Status code",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
@@ -275,7 +349,7 @@
       "type": "timeseries",
       "title": "Latensi p95 per server",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -301,7 +375,7 @@
       "type": "stat",
       "title": "Status target scrape",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
