@@ -26,3 +26,6 @@ scrape_configs:
       - targets: ["server-3:3000"]
         labels:
           server: server-3
+      - targets: ["server-4:3000"]
+        labels:
+          server: server-4

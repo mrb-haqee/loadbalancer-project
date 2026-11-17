@@ -15,7 +15,7 @@ import {
   waitFor,
 } from './helpers/docker-stack.js';
 
-const SERVERS = ['server-1', 'server-2', 'server-3'];
+const SERVERS = ['server-1', 'server-2', 'server-3', 'server-4'];
 
 function countBy(results) {
   const counts = {};
