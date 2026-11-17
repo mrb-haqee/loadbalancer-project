@@ -1,0 +1,302 @@
+{
+  "uid": "k6-lb",
+  "title": "k6 — Load Balancer 3 Server",
+  "tags": ["k6", "load-balancer"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "run",
+        "label": "Run",
+        "type": "query",
+        "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+        "query": "SHOW TAG VALUES FROM \"http_reqs\" WITH KEY = \"run\"",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "sort": 2,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total request",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Request gagal",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT sum(\"value\") FROM \"http_req_failed\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Check lulus",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "green" } },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT sum(\"value\") FROM \"checks\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "VU maksimum",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "purple" } },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT max(\"value\") FROM \"vus_max\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Request per detik",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 15, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "request/detik",
+          "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time(1s) fill(0)"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latensi (ms)",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 0, "showPoints": "never" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["max", "mean", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "p50",
+          "query": "SELECT percentile(\"value\", 50) FROM \"http_req_duration\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval) fill(null)"
+        },
+        {
+          "refId": "B",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "p95",
+          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval) fill(null)"
+        },
+        {
+          "refId": "C",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "p99",
+          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval) fill(null)"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Sebaran request per server",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "server-1",
+          "query": "SELECT sum(\"value\") FROM \"served_server_1\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+        },
+        {
+          "refId": "B",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "server-2",
+          "query": "SELECT sum(\"value\") FROM \"served_server_2\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+        },
+        {
+          "refId": "C",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "server-3",
+          "query": "SELECT sum(\"value\") FROM \"served_server_3\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Status code",
+      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "stacking": { "mode": "normal", "group": "A" },
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "$tag_status",
+          "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval), \"status\" fill(0)"
+        }
+      ]
+    }
+  ]
+}

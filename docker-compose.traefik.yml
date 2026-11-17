@@ -1,0 +1,43 @@
+name: lb-traefik
+
+# Traefik berdiri sendiri: tidak memiliki backend maupun dashboard monitoring.
+# Tugasnya hanya menerima trafik dan meneruskannya ke container berlabel di
+# network lb-net (backend di project lb-demo, Grafana/k6 di project lb-k6).
+#
+# Network lb-net dibuat sekali di luar compose (`npm run net:up`), supaya tidak
+# ada project yang jadi "induk" tersembunyi dari project lain.
+
+services:
+  traefik:
+    image: traefik:latest
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "80:80"      # URL bersih: http://server.localhost, http://grafana.localhost, ...
+      - "8088:80"    # cadangan kalau port 80 dipakai aplikasi lain
+      - "8089:8080"  # dashboard + API Traefik (dipakai test suite)
+    volumes:
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      traefik.enable: "true"
+      # Prioritas 200 > router "demo" (1) yang menangkap semua host sebagai
+      # fallback. Jadi traefik.localhost tidak ikut dilempar ke backend.
+      traefik.http.routers.traefik-dash.entrypoints: "web"
+      traefik.http.routers.traefik-dash.rule: "Host(`traefik.localhost`)"
+      traefik.http.routers.traefik-dash.priority: "200"
+      # api@internal menyajikan /api dan /dashboard/ tanpa container tambahan.
+      traefik.http.routers.traefik-dash.service: "api@internal"
+    networks:
+      lb-net:
+        # Alias ini membuat `server.localhost` resolve ke Traefik DI DALAM
+        # network lb-net, sehingga k6 di container bisa menembak URL yang sama
+        # dengan yang dipakai di browser (Host header tetap server.localhost).
+        aliases:
+          - server.localhost
+    restart: unless-stopped
+
+networks:
+  lb-net:
+    external: true
+    name: lb-net

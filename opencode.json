@@ -1,0 +1,33 @@
+{
+  "provider": {
+    "9router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://9router.mrbhaqee.my.id/v1",
+        "apiKey": "sk-1eaaf4d44fc23336-9cq9fu-9171ca44"
+      },
+      "models": {
+        "combo-deepseek": {
+          "name": "combo-deepseek",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "model": "9router/combo-deepseek",
+  "agent": {
+    "explorer": {
+      "description": "Fast explorer subagent for codebase exploration",
+      "mode": "subagent",
+      "model": "9router/combo-deepseek"
+    }
+  }
+}

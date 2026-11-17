@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const PROJECT = 'lb-demo';
 const COMPOSE_ARGS = ['compose', '-p', PROJECT, '-f', resolve(ROOT, 'docker-compose.yml')];
+const TRAEFIK_COMPOSE_ARGS = ['compose', '-p', 'lb-traefik', '-f', resolve(ROOT, 'docker-compose.traefik.yml')];
+const NETWORK = 'lb-net';
 
 export const LB_URL = process.env.LB_DOCKER_URL ?? 'http://127.0.0.1:8088';
 export const LB_HOST_URL = process.env.LB_HOST_URL ?? 'http://server.localhost';
@@ -96,7 +98,29 @@ export function services() {
   }
 }
 
+function run(args) {
+  const result = spawnSync(args[0], args.slice(1), { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+  if (result.status !== 0) {
+    throw new Error(
+      `${args.join(' ')} gagal (exit ${result.status})\n--- stdout ---\n${result.stdout ?? ''}\n--- stderr ---\n${result.stderr ?? ''}`,
+    );
+  }
+  return result;
+}
+
+/** Network bersama lb-net dibuat di luar compose, jadi harus dipastikan ada. */
+function ensureNetwork() {
+  const exists =
+    spawnSync('docker', ['network', 'inspect', NETWORK], { encoding: 'utf8', timeout: 30000 }).status === 0;
+  if (!exists) run(['docker', 'network', 'create', NETWORK]);
+}
+
 export async function up({ rebuild = true } = {}) {
+  // Traefik bukan lagi bagian project lb-demo, jadi test harus memastikan
+  // network bersama dan Traefik hidup lebih dulu. Keduanya idempotent.
+  ensureNetwork();
+  run(['docker', ...TRAEFIK_COMPOSE_ARGS, 'up', '-d']);
+
   compose(['up', '-d', ...(rebuild ? ['--build'] : [])]);
 
   // Tunggu API Traefik hidup dulu; ini penanda paling andal bahwa Traefik sudah
@@ -160,6 +184,9 @@ export async function up({ rebuild = true } = {}) {
 }
 
 export function down() {
+  // Hanya lb-demo yang dimatikan. Traefik dibiarkan hidup karena mungkin dipakai
+  // project lain (mis. dashboard Grafana di lb-k6); test tidak merusak stack
+  // yang sedang dipakai.
   compose(['down', '--remove-orphans'], { allowFail: true });
 }
 

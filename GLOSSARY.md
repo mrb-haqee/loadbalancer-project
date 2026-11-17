@@ -54,6 +54,12 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **WRR (Weighted Round Robin)** — Algoritma default Traefik: round robin dengan bobot; pada project ini semua Server berbobot sama sehingga hasilnya bergiliran.
 
+**Project Compose** — Satu kesatuan container yang dikelola perintah `docker compose -p <nama>`. Project ini memakai tiga: `lb-traefik`, `lb-demo`, `lb-k6`; masing-masing bisa dinyalakan/dimatikan sendiri.
+
+**Network Bersama** — Network Docker yang dibuat di luar project-project compose dan dipakai sebagai *external*, sehingga container dari project berbeda bisa saling menjangkau tanpa satu project menjadi milik project lain.
+
+**Prioritas Router** — Angka penentu router mana yang dipakai bila beberapa router cocok dengan satu request; angka lebih besar menang, sehingga router spesifik mengalahkan router fallback.
+
 ## Istilah pengujian beban
 
 **Virtual User (VU)** — Simulasi satu pengguna yang menjalankan iterasi skrip k6 secara bersamaan dengan VU lain.
@@ -61,3 +67,25 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 **Constant Arrival Rate** — Model beban k6 yang menjaga jumlah request masuk per detik tetap konstan, berapa pun VU yang dibutuhkan.
 
 **Threshold** — Batas kelulusan yang ditetapkan pada skrip k6 (mis. tingkat gagal < 1%); bila dilanggar, k6 keluar dengan status gagal.
+
+**Tag `run`** — Label berisi timestamp yang ditempel ke semua metrik satu eksekusi k6, supaya hasil beberapa run bisa dipisah dan dibandingkan di dashboard.
+
+## Istilah pemantauan
+
+**Metrik** — Angka hasil pengukuran k6 (mis. `http_reqs`, `http_req_duration`), dikirim ke penyimpanan deret waktu setelah test.
+
+**Output Metrik** — Tujuan pengiriman metrik k6; di project ini `influxdb=http://influxdb:8086/k6` (statusnya deprecated di k6 v2.4.0, diganti OpenTelemetry di k6 v3).
+
+**Deret Waktu (time series)** — Kumpulan nilai yang diberi timestamp, sehingga bisa digambar sebagai grafik dari waktu ke waktu.
+
+**InfluxDB** — Database deret waktu tempat metrik k6 disimpan; di project ini versi 1.8, database `k6`, tidak dipublikasikan ke host.
+
+**Grafana** — Aplikasi dashboard yang membaca InfluxDB dan menggambar panel; di project ini port 3000.
+
+**Dashboard Terprovisi (provisioned dashboard)** — Dashboard yang dibaca Grafana dari file (`monitoring/grafana/dashboards/k6.json`) saat start, bukan dibuat manual lewat UI; perubahan lewat UI tidak disimpan karena `allowUiUpdates: false`.
+
+**Datasource** — Koneksi Grafana ke sumber data; di project ini `k6-influxdb` dengan uid `k6-influxdb`.
+
+**Web Dashboard k6** — Dashboard bawaan binary k6 yang tampil real-time selama test di port 5665 dan bisa diekspor jadi `report.html`; datanya hilang setelah test selesai, berbeda dari Grafana.
+
+**Network Eksternal (external network)** — Network yang sudah ada dan dibuat project lain; `lb-net` dipakai stack monitoring sebagai external supaya k6 bisa menembak Traefik tanpa menggabungkan kedua project.

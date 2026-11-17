@@ -6,9 +6,13 @@ import { recordServedBy } from './lib/backend-counters.js';
 //   bun scripts/k6.js run k6/load-test.js -e BASE_URL=http://127.0.0.1:8088
 //   bun scripts/k6.js run k6/load-test.js -e BASE_URL=http://server-1.localhost   # satu server saja
 const BASE_URL = __ENV.BASE_URL || 'http://server.localhost';
-const PATH = __ENV.PATH || '/halo';
+// Jangan pakai nama PATH: di dalam container, PATH sudah dipakai OS.
+const TARGET_PATH = __ENV.K6_PATH || '/halo';
+// Tag `run` membedakan tiap eksekusi di dashboard Grafana (bisa difilter).
+const RUN_ID = __ENV.RUN_ID || new Date().toISOString().replace(/[:.]/g, '-');
 
 export const options = {
+  tags: { run: RUN_ID },
   scenarios: {
     tetap: {
       executor: 'constant-arrival-rate',
@@ -27,7 +31,7 @@ export const options = {
 };
 
 export default function () {
-  const res = http.get(`${BASE_URL}${PATH}?dari=k6`);
+  const res = http.get(`${BASE_URL}${TARGET_PATH}?dari=k6`);
   const server = res.headers['X-Served-By'] || res.headers['x-served-by'] || '';
 
   recordServedBy(server);

@@ -11,8 +11,11 @@ import { recordServedBy } from './lib/backend-counters.js';
  *   bun scripts/k6.js run k6/failover.js -e BASE_URL=http://127.0.0.1:8088
  */
 const BASE_URL = __ENV.BASE_URL || 'http://server.localhost';
+// Tag `run` membedakan tiap eksekusi di dashboard Grafana (bisa difilter).
+const RUN_ID = __ENV.RUN_ID || new Date().toISOString().replace(/[:.]/g, '-');
 
 export const options = {
+  tags: { run: RUN_ID },
   scenarios: {
     terus_menerus: {
       executor: 'constant-arrival-rate',

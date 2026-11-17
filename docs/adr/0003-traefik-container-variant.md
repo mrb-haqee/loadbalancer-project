@@ -3,6 +3,7 @@
 - **Status:** Diterima — **satu-satunya varian yang tersisa** di project ini
 - **Tanggal:** 17 November 2026
 - **Revisi 17 November 2026:** varian Node dihapus atas permintaan pemilik project (hanya ingin versi container). Bagian di bawah yang menyebut varian Node dipertahankan sebagai catatan konteks saat keputusan diambil.
+- **Revisi 17 November 2026 (kedua):** Traefik dipindah ke project compose sendiri (`lb-traefik`, file `docker-compose.traefik.yml`); project `lb-demo` kini hanya berisi backend. Lihat [ADR 0005](0005-traefik-project-terpisah.md). Kalimat di bawah yang menyebut Traefik berada di `lb-demo` adalah kondisi saat keputusan ini diambil.
 
 ## Konteks
 

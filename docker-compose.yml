@@ -79,24 +79,11 @@ services:
       <<: [*demo-labels, *direct-3]
     restart: unless-stopped
 
-  traefik:
-    image: traefik:latest
-    command:
-      - "--configFile=/etc/traefik/traefik.yml"
-    ports:
-      - "80:80"      # URL bersih: http://server.localhost & http://server-N.localhost
-      - "8088:80"    # cadangan kalau port 80 dipakai aplikasi lain
-      - "8089:8080"  # dashboard + API Traefik
-    volumes:
-      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - lb-net
-    restart: unless-stopped
-
 # Network terisolasi: tidak menyentuh network project lain
 # (proxy, sanmedclinic_internal, shared-api, dll).
+# Traefik TIDAK ada di file ini (lihat docker-compose.traefik.yml), jadi
+# network dibuat di luar compose lewat `npm run net:up` dan dipakai bersama.
 networks:
   lb-net:
+    external: true
     name: lb-net
-    driver: bridge
