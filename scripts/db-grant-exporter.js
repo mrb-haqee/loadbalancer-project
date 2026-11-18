@@ -67,7 +67,7 @@ async function waitForDatabase() {
 const grantSql = [
   `CREATE USER IF NOT EXISTS 'lb_exporter'@'%' IDENTIFIED BY ${sqlString(exporterPassword)};`,
   `ALTER USER 'lb_exporter'@'%' IDENTIFIED BY ${sqlString(exporterPassword)};`,
-  "GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'lb_exporter'@'%';",
+  "GRANT PROCESS, REPLICATION CLIENT, SLAVE MONITOR ON *.* TO 'lb_exporter'@'%';",
   'FLUSH PRIVILEGES;',
 ].join('\n');
 
@@ -77,7 +77,7 @@ try {
   if (result.status !== 0) {
     throw new Error((result.stderr || result.stdout || 'gagal menjalankan GRANT').trim());
   }
-  console.log('user lb_exporter siap (PROCESS, REPLICATION CLIENT)');
+  console.log('user lb_exporter siap (PROCESS, REPLICATION CLIENT, SLAVE MONITOR)');
 } catch (error) {
   console.error(`[db-grant-exporter] ${error.message}`);
   console.error('[db-grant-exporter] pastikan `make db-up` sudah jalan dan MARIADB_ROOT_PASSWORD benar.');

@@ -1,10 +1,10 @@
 {
   "uid": "k6-lb",
   "title": "k6 - Load Balancer 5 Server",
-  "tags": ["k6", "load-balancer"],
+  "tags": ["k6", "load-balancer", "prometheus"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "5s",
   "time": { "from": "now-30m", "to": "now" },
   "links": [
@@ -16,7 +16,7 @@
       "targetBlank": true,
       "includeVars": false,
       "keepTime": false,
-      "tooltip": "Mulai satu Run k6 (100 req/detik, 15 detik). Hasil masuk dashboard ini."
+      "tooltip": "Buka halaman konfirmasi Trigger untuk memulai satu Run k6 (100 req/detik, 15 detik)."
     }
   ],
   "templating": {
@@ -25,8 +25,13 @@
         "name": "run",
         "label": "Run",
         "type": "query",
-        "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
-        "query": "SHOW TAG VALUES FROM \"http_reqs\" WITH KEY = \"run\"",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(k6_http_reqs_total, run)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(k6_http_reqs_total, run)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -42,12 +47,13 @@
       "id": 1,
       "type": "stat",
       "title": "Total request",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 0,
+          "noValue": "0",
           "color": { "mode": "fixed", "fixedColor": "blue" }
         },
         "overrides": []
@@ -63,9 +69,11 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(last_over_time(k6_http_reqs_total{run=~\"$run\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "total"
         }
       ]
     },
@@ -73,12 +81,13 @@
       "id": 2,
       "type": "stat",
       "title": "Request gagal",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -100,20 +109,32 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "query": "SELECT sum(\"value\") FROM \"http_req_failed\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(last_over_time(k6_http_reqs_total{run=~\"$run\",expected_response=\"false\"}[$__range])) or vector(0)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "gagal"
         }
       ]
     },
     {
       "id": 3,
       "type": "stat",
-      "title": "Check lulus",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "title": "Tingkat check lulus",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
       "fieldConfig": {
-        "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "green" } },
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
         "overrides": []
       },
       "options": {
@@ -127,9 +148,11 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "query": "SELECT sum(\"value\") FROM \"checks\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "avg(last_over_time(k6_checks_rate{run=~\"$run\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "checks"
         }
       ]
     },
@@ -137,10 +160,14 @@
       "id": 4,
       "type": "stat",
       "title": "VU maksimum",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
       "fieldConfig": {
-        "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "purple" } },
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "purple" }
+        },
         "overrides": []
       },
       "options": {
@@ -154,9 +181,11 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "query": "SELECT max(\"value\") FROM \"vus_max\" WHERE $timeFilter AND \"run\" =~ /^$run$/"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(max_over_time(k6_vus_max{run=~\"$run\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "vus_max"
         }
       ]
     },
@@ -164,7 +193,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Request per detik",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
       "fieldConfig": {
         "defaults": {
@@ -180,22 +209,21 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "request/detik",
-          "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time(1s) fill(0)"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(k6_http_reqs_total{run=~\"$run\"}[5s]))",
+          "legendFormat": "request/detik"
         }
       ]
     },
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Latensi (ms)",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "title": "Latensi",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 0, "showPoints": "never" }
         },
         "overrides": []
@@ -207,24 +235,21 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "p50",
-          "query": "SELECT percentile(\"value\", 50) FROM \"http_req_duration\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval) fill(null)"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(k6_http_req_duration_p50{run=~\"$run\"})",
+          "legendFormat": "p50"
         },
         {
           "refId": "B",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "p95",
-          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval) fill(null)"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(k6_http_req_duration_p95{run=~\"$run\"})",
+          "legendFormat": "p95"
         },
         {
           "refId": "C",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "p99",
-          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval) fill(null)"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(k6_http_req_duration_p99{run=~\"$run\"})",
+          "legendFormat": "p99"
         }
       ]
     },
@@ -232,7 +257,7 @@
       "id": 7,
       "type": "bargauge",
       "title": "Sebaran request per server",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
       "fieldConfig": {
         "defaults": {
@@ -256,10 +281,11 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "$tag_server",
-          "query": "SELECT sum(\"value\") FROM \"served\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY \"server\""
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (server) (last_over_time(k6_served_total{run=~\"$run\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{server}}"
         }
       ]
     },
@@ -267,11 +293,11 @@
       "id": 8,
       "type": "timeseries",
       "title": "Status code",
-      "datasource": { "type": "influxdb", "uid": "k6-influxdb" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "reqps",
           "custom": {
             "drawStyle": "bars",
             "lineWidth": 1,
@@ -289,10 +315,9 @@
       "targets": [
         {
           "refId": "A",
-          "rawQuery": true,
-          "resultFormat": "time_series",
-          "alias": "$tag_status",
-          "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter AND \"run\" =~ /^$run$/ GROUP BY time($__interval), \"status\" fill(0)"
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (status) (rate(k6_http_reqs_total{run=~\"$run\"}[5s]))",
+          "legendFormat": "{{status}}"
         }
       ]
     }

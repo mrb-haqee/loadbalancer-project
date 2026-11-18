@@ -10,7 +10,7 @@ name: lb-traefik
 
 services:
   traefik:
-    image: traefik:latest
+    image: traefik:v3.6.6
     command:
       - "--configFile=/etc/traefik/traefik.yml"
     ports:
@@ -22,6 +22,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
       traefik.enable: "true"
+      lb.logs: "true"
       # Prioritas 200 > router "demo" (1) yang menangkap semua host sebagai
       # fallback. Jadi traefik.localhost tidak ikut dilempar ke backend.
       traefik.http.routers.traefik-dash.entrypoints: "web"

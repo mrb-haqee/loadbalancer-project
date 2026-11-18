@@ -14,16 +14,18 @@ const BASE_URL = __ENV.BASE_URL || 'http://server.localhost';
 // Tag `run` membedakan tiap eksekusi di dashboard Grafana (bisa difilter).
 const RUN_ID = __ENV.RUN_ID || new Date().toISOString().replace(/[:.]/g, '-');
 
+const RATE = Number(__ENV.RATE || 50);
+
 export const options = {
   tags: { run: RUN_ID },
   scenarios: {
     terus_menerus: {
       executor: 'constant-arrival-rate',
-      rate: Number(__ENV.RATE || 50),
+      rate: RATE,
       timeUnit: '1s',
       duration: __ENV.DURATION || '40s',
-      preAllocatedVUs: 30,
-      maxVUs: 200,
+      preAllocatedVUs: Math.max(30, Math.ceil(RATE * 0.5)),
+      maxVUs: Math.max(200, RATE * 3),
     },
   },
   thresholds: {

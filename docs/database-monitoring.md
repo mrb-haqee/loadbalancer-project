@@ -48,7 +48,7 @@ make db-grant-exporter
 |---|---|
 | User | `lb_exporter` (host `%`) |
 | Password | `MARIADB_EXPORTER_PASSWORD`, default `lb_exporter_password` |
-| Hak | `PROCESS`, `REPLICATION CLIENT` pada `*.*` |
+| Hak | `PROCESS`, `REPLICATION CLIENT`, `SLAVE MONITOR` pada `*.*` |
 
 Dibuat idempotent oleh `scripts/db-grant-exporter.js` (bukan lewat `db/init`), supaya
 volume `lb-db-data` yang sudah ada ikut mendapatkannya tanpa `db-reset` — `db-reset`
@@ -82,8 +82,7 @@ Contoh yang dipakai dashboard dan alert:
 | `mysql_global_status_aborted_connects` / `aborted_clients` | koneksi gagal / terputus |
 | `mysql_global_status_innodb_buffer_pool_reads` / `_read_requests` | dipakai untuk hit ratio |
 
-`up{job="mariadb"}` adalah metrik Prometheus, bukan eksporter: 0 berarti exporter tidak
-bisa di-scrape **atau** tidak bisa login ke MariaDB. Dua-duanya patut diberi alert.
+`up{job="mariadb"}` hanya menunjukkan apakah Prometheus berhasil men-scrape exporter (`mysqld-exporter`), sedangkan `mysql_up` menunjukkan apakah exporter berhasil login ke MariaDB. Saat MariaDB mati tetapi exporter hidup, `up{job="mariadb"}` tetap `1` dan `mysql_up` menjadi `0`; karena itu dashboard dan alert memakai `(min(mysql_up{job="mariadb"}) * min(up{job="mariadb"})) or vector(0)`.
 
 ### Dari backend (aplikasi)
 
@@ -118,7 +117,7 @@ Buka `http://grafana.localhost/d/db-monitoring` (uid `db-monitoring`, folder
 
 | Panel | Isi |
 |---|---|
-| Status MariaDB | `up{job="mariadb"}` dengan mapping UP/DOWN |
+| Status MariaDB | `(min(mysql_up{job="mariadb"}) * min(up{job="mariadb"})) or vector(0)` dengan mapping UP/DOWN |
 | Error DB dari backend / menit | `sum(rate(lb_db_errors_total{code!="ER_DUP_ENTRY"}[2m])) * 60` |
 | Koneksi aktif | `mysql_global_status_threads_connected` |
 | Slow query (5 menit) | `increase(mysql_global_status_slow_queries[5m])` |
@@ -159,8 +158,9 @@ Label `lb.logs=true` ada di:
 
 - `docker-compose.db.yml` → service `mariadb`
 - `docker-compose.yml` → `x-main-labels`, jadi ikut semua backend
+- `docker-compose.traefik.yml` → service `traefik` (hanya access log 4xx/5xx dan request lambat ≥ 500ms)
 
-Adminer, Traefik, dan container monitoring sengaja tidak dilabeli supaya Loki tidak
+Adminer dan container monitoring sengaja tidak dilabeli supaya Loki tidak
 penuh log yang tidak diminta.
 
 Contoh query di Grafana Explore (datasource `loki`):
@@ -193,7 +193,7 @@ di menu **Alerting** serta panel **Alert database**.
 
 | UID | Nama | Kondisi | For | Severity |
 |---|---|---|---|---|
-| `mariadb-down` | MariaDB tidak terjangkau | `up{job="mariadb"} < 1` | 30s | critical |
+| `mariadb-down` | MariaDB tidak terjangkau | `(min(mysql_up{job="mariadb"}) * min(up{job="mariadb"})) or vector(0) < 1` | 30s | critical |
 | `mariadb-connections-high` | Koneksi MariaDB hampir penuh | `threads_connected / max_connections > 0.8` | 2m | warning |
 | `mariadb-slow-queries` | Slow query menumpuk | `increase(slow_queries[5m]) > 5` | 1m | warning |
 | `api-db-errors` | Backend gagal mengakses database | `sum(rate(lb_db_errors_total{code!="ER_DUP_ENTRY"}[2m])) > 0` | 1m | warning |

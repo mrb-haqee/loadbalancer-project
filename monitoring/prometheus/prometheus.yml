@@ -39,9 +39,8 @@ scrape_configs:
         target_label: server
 
   # Metrik MariaDB lewat mysqld-exporter (project lb-k6, service tetap).
-  # Satu target saja: exporter yang bicara ke MariaDB, bukan Prometheus.
-  # `up{job="mariadb"} == 0` berarti exporter tidak bisa di-scrape ATAU
-  # tidak bisa login ke MariaDB — dua-duanya patut diberi alert.
+  # `up{job="mariadb"}` hanya menguji apakah exporter bisa di-scrape; status
+  # koneksi ke MariaDB sendiri ada di `mysql_up` (0 saat DB mati/login gagal).
   - job_name: mariadb
     static_configs:
       - targets: ["mysqld-exporter:9104"]

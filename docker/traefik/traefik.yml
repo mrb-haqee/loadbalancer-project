@@ -42,3 +42,9 @@ log:
 
 accessLog:
   format: common
+  # Hanya catat error (4xx/5xx) atau request lambat >= 500ms supaya Loki tidak
+  # banjir probe /health dan request statis normal.
+  filters:
+    statusCodes:
+      - "400-599"
+    minDuration: "500ms"

@@ -17,47 +17,54 @@ function mapRow(row) {
   };
 }
 
-export async function listServers() {
+async function fetchServerById(id, db) {
+  const conn = db ?? (await getPool());
+  const [rows] = await conn.execute(`SELECT ${COLUMNS} FROM registered_servers WHERE id = ? LIMIT 1`, [id]);
+  return rows.length ? mapRow(rows[0]) : null;
+}
+
+export async function listServers(db) {
+  const conn = db ?? (await getPool());
   const [rows] = await measureDbQuery('list', () =>
-    getPool().query(`SELECT ${COLUMNS} FROM registered_servers ORDER BY name ASC, id ASC`),
+    conn.query(`SELECT ${COLUMNS} FROM registered_servers ORDER BY name ASC, id ASC`),
   );
   return rows.map(mapRow);
 }
 
-export async function getServer(id) {
-  const [rows] = await measureDbQuery('get', () =>
-    getPool().execute(`SELECT ${COLUMNS} FROM registered_servers WHERE id = ? LIMIT 1`, [id]),
-  );
-  return rows.length ? mapRow(rows[0]) : null;
+export async function getServer(id, db) {
+  return measureDbQuery('get', () => fetchServerById(id, db));
 }
 
-export async function createServer(input) {
+export async function createServer(input, db) {
+  const conn = db ?? (await getPool());
   const [result] = await measureDbQuery('insert', () =>
-    getPool().execute(
+    conn.execute(
       `INSERT INTO registered_servers (name, host, port, weight, enabled, note)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [input.name, input.host, input.port, input.weight, input.enabled ? 1 : 0, input.note],
     ),
   );
-  return getServer(result.insertId);
+  return fetchServerById(result.insertId, conn);
 }
 
-export async function updateServer(id, input) {
-  await measureDbQuery('update', () =>
-    getPool().execute(
+export async function updateServer(id, input, db) {
+  const conn = db ?? (await getPool());
+  const [result] = await measureDbQuery('update', () =>
+    conn.execute(
       `UPDATE registered_servers
           SET name = ?, host = ?, port = ?, weight = ?, enabled = ?, note = ?
         WHERE id = ?`,
       [input.name, input.host, input.port, input.weight, input.enabled ? 1 : 0, input.note, id],
     ),
   );
-  // Dibaca ulang supaya respons selalu berisi nilai terbaru, termasuk updated_at.
-  return getServer(id);
+  if (result.affectedRows === 0) return null;
+  return fetchServerById(id, conn);
 }
 
-export async function deleteServer(id) {
+export async function deleteServer(id, db) {
+  const conn = db ?? (await getPool());
   const [result] = await measureDbQuery('delete', () =>
-    getPool().execute('DELETE FROM registered_servers WHERE id = ?', [id]),
+    conn.execute('DELETE FROM registered_servers WHERE id = ?', [id]),
   );
   return result.affectedRows > 0;
 }

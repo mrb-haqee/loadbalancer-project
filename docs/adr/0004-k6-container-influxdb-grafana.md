@@ -1,6 +1,6 @@
 # 0004 — k6 dijalankan di container, hasilnya disimpan di InfluxDB 1.8 dan dibaca Grafana
 
-- **Status:** Diterima
+- **Status:** Digantikan sebagian oleh [ADR 0012](0012-prometheus-tunggal-tanpa-influxdb.md) (penyimpanan k6 pindah dari InfluxDB 1.8 ke Prometheus)
 - **Tanggal:** 17 November 2026
 - **Revisi 17 November 2026:** Traefik dipindah ke project sendiri (`lb-traefik`), jadi alias network `server.localhost` kini ada di `docker-compose.traefik.yml`, dan Grafana/k6 mendapat URL `grafana.localhost` / `k6.localhost`. Lihat [ADR 0005](0005-traefik-project-terpisah.md).
 

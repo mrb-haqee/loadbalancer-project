@@ -1,7 +1,7 @@
 apiVersion: 1
 
-# Dashboard trafik nyata (Prometheus) dipisah dari dashboard hasil test k6
-# (InfluxDB) supaya tidak ada panel kosong yang membingungkan.
+# Dashboard trafik nyata dipisah dari dashboard hasil Run k6
+# supaya panel real-time tidak bercampur dengan histori pengujian beban.
 providers:
   - name: lb
     orgId: 1

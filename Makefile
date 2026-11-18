@@ -69,11 +69,11 @@ help:
 	@echo     make docker-ps         Status + health container backend
 	@echo     make docker-logs       Log 5 backend
 	@echo   Monitoring:
-	@echo     make k6-up             Grafana, InfluxDB, Prometheus, exporter, Loki, Alloy
+	@echo     make k6-up             Grafana, Prometheus, k6-runner, exporter, Loki, Alloy
 	@echo     make k6-run            Jalankan k6 sekali di container
 	@echo     make k6-watch          k6 + web dashboard di http://k6.localhost
 	@echo     make k6-down           Matikan stack monitoring - data di volume tetap
-	@echo     make k6-logs           Log InfluxDB/Grafana/k6
+	@echo     make k6-logs           Log Grafana/Prometheus/Loki/k6
 	@echo   Test:
 	@echo     make test              Test Docker end-to-end - butuh Docker
 	@echo     make test-backend      Unit test validasi CRUD + metrik DB - tanpa Docker
@@ -138,7 +138,7 @@ docker-logs:
 # --- monitoring ------------------------------------------------------------
 
 k6-up:
-	$(COMPOSE_K6) up -d --build influxdb grafana prometheus k6-runner mysqld-exporter loki alloy
+	$(COMPOSE_K6) up -d --build grafana prometheus k6-runner mysqld-exporter loki alloy
 
 k6-run:
 	$(COMPOSE_K6) run --rm k6

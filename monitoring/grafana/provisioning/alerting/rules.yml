@@ -1,20 +1,16 @@
 apiVersion: 1
 
-# Alert rule Grafana (bukan Prometheus/Alertmanager) supaya tidak menambah
-# container dan status firing langsung terlihat di Grafana.
-#
-# Belum ada contact point keluar (email/Telegram/webhook). Alert tetap
-# dihitung dan tampil di menu Alerting serta panel "Alert list". Cara
-# menambah notifikasi ada di docs/database-monitoring.md.
+# Alert rule Grafana untuk Load Balancer dan Database.
+# Belum ada contact point keluar; status firing terlihat langsung di Grafana.
 
 groups:
   - orgId: 1
-    name: database
-    folder: Database
-    interval: 1m
+    name: load-balancer
+    folder: Load Balancer
+    interval: 30s
     rules:
-      - uid: mariadb-down
-        title: MariaDB tidak terjangkau
+      - uid: lb-backend-down
+        title: Seluruh backend mati
         condition: C
         data:
           - refId: A
@@ -24,7 +20,7 @@ groups:
             datasourceUid: prometheus
             model:
               editorMode: code
-              expr: up{job="mariadb"}
+              expr: count(up{job="backend"} == 1) or vector(0)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -57,9 +53,172 @@ groups:
         execErrState: Alerting
         for: 30s
         annotations:
-          summary: MariaDB mati atau tidak bisa di-scrape
+          summary: Tidak ada backend sehat di rotasi
           description: >
-            `up{job="mariadb"}` bernilai 0 atau tidak ada data selama 30 detik.
+            `count(up{job="backend"} == 1)` bernilai 0 selama 30 detik.
+            Seluruh request klien akan ditolak. Cek `make docker-ps` dan `make docker-logs`.
+        labels:
+          severity: critical
+          component: load-balancer
+        isPaused: false
+
+      - uid: lb-backend-degraded
+        title: Kapasitas backend berkurang
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: count(up{job="backend"} == 1) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Error
+        for: 30s
+        annotations:
+          summary: Kurang dari 5 backend berstatus sehat
+          description: >
+            Sebagian backend keluar dari rotasi. Cek `make docker-ps` untuk
+            melihat server mana yang berhenti atau unhealthy.
+        labels:
+          severity: warning
+          component: load-balancer
+        isPaused: false
+
+      - uid: lb-5xx-spike
+        title: Error 5xx pada Load Balancer
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: sum(rate(traefik_service_requests_total{service="demo@docker",code=~"5.."}[1m])) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Service Load Balancer menghasilkan respons 5xx
+          description: >
+            Ada error 5xx pada `demo@docker` selama 1 menit. Cek log `{project=~"lb-traefik|lb-demo"}` di Loki.
+        labels:
+          severity: warning
+          component: load-balancer
+        isPaused: false
+
+  - orgId: 1
+    name: database
+    folder: Database
+    interval: 1m
+    rules:
+      - uid: mariadb-down
+        title: MariaDB tidak terjangkau
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: (min(mysql_up{job="mariadb"}) * min(up{job="mariadb"})) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 30s
+        annotations:
+          summary: MariaDB mati atau gagal diakses exporter
+          description: >
+            Status gabungan `mysql_up` dan `up{job="mariadb"}` bernilai 0 selama 30 detik.
             Cek `make db-ps`, `docker logs lb-db-mariadb-1`, dan kredensial
             user `lb_exporter` (`make db-grant-exporter`).
         labels:

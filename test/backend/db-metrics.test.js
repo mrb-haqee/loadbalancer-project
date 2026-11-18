@@ -47,6 +47,7 @@ test('resetDbMetrics mengosongkan semua angka', async () => {
 
   const text = renderDbMetrics('server-4');
   assert.doesNotMatch(text, /lb_db_queries_total\{server="server-4"/);
-  assert.match(text, /lb_db_query_duration_seconds_count\{server="server-4"\} 0/);
+  assert.match(renderDbMetrics('server-4'), /lb_db_query_duration_seconds_count\{server="server-4"\} 0/);
   assert.doesNotMatch(text, /lb_db_errors_total\{server="server-4",code=/);
 });
+

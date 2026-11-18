@@ -11,16 +11,18 @@ const TARGET_PATH = __ENV.K6_PATH || '/halo';
 // Tag `run` membedakan tiap eksekusi di dashboard Grafana (bisa difilter).
 const RUN_ID = __ENV.RUN_ID || new Date().toISOString().replace(/[:.]/g, '-');
 
+const RATE = Number(__ENV.RATE || 100);
+
 export const options = {
   tags: { run: RUN_ID },
   scenarios: {
     tetap: {
       executor: 'constant-arrival-rate',
-      rate: Number(__ENV.RATE || 100),
+      rate: RATE,
       timeUnit: '1s',
       duration: __ENV.DURATION || '15s',
-      preAllocatedVUs: 20,
-      maxVUs: 150,
+      preAllocatedVUs: Math.max(20, Math.ceil(RATE * 0.25)),
+      maxVUs: Math.max(150, RATE * 2),
     },
   },
   thresholds: {

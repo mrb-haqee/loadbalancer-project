@@ -12,14 +12,15 @@
     {
       "id": 11,
       "type": "stat",
-      "title": "Total request berhasil (2xx)",
-      "description": "Jumlah request 2xx sepanjang rentang waktu dashboard, bukan per detik.",
+      "title": "Total request LB berhasil (2xx)",
+      "description": "Jumlah request 2xx ke service backend sepanjang rentang waktu dashboard (tanpa mencampur trafik Grafana/Adminer/scrape).",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 12, "x": 0, "y": 5 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 0,
+          "noValue": "0",
           "color": { "mode": "fixed", "fixedColor": "green" }
         },
         "overrides": []
@@ -36,7 +37,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(traefik_entrypoint_requests_total{protocol=\"http\",code=~\"2..\"}[$__range]))",
+          "expr": "sum(increase(traefik_service_requests_total{service=~\"demo@docker|direct-.*@docker\",code=~\"2..\"}[$__range])) or vector(0)",
           "instant": true,
           "range": false,
           "legendFormat": "2xx"
@@ -46,14 +47,15 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "Total request error (4xx + 5xx)",
-      "description": "Jumlah request 4xx dan 5xx sepanjang rentang waktu dashboard, bukan per detik.",
+      "title": "Total request LB error (4xx + 5xx)",
+      "description": "Jumlah request 4xx dan 5xx pada service backend sepanjang rentang waktu dashboard.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 12, "x": 12, "y": 5 },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -76,7 +78,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(traefik_entrypoint_requests_total{protocol=\"http\",code=~\"4..|5..\"}[$__range]))",
+          "expr": "sum(increase(traefik_service_requests_total{service=~\"demo@docker|direct-.*@docker\",code=~\"4..|5..\"}[$__range])) or vector(0)",
           "instant": true,
           "range": false,
           "legendFormat": "4xx+5xx"
@@ -86,13 +88,14 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Request masuk / detik (Traefik)",
+      "title": "Request LB masuk / detik (Traefik)",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
           "decimals": 2,
+          "noValue": "0",
           "color": { "mode": "fixed", "fixedColor": "blue" }
         },
         "overrides": []
@@ -109,7 +112,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(traefik_entrypoint_requests_total{protocol=\"http\"}[30s]))",
+          "expr": "sum(rate(traefik_service_requests_total{service=~\"demo@docker|direct-.*@docker\"}[30s])) or vector(0)",
           "instant": true,
           "range": false,
           "legendFormat": "masuk"
@@ -181,7 +184,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(traefik_entrypoint_requests_total{protocol=\"http\",code=~\"5..\"}[1m]))",
+          "expr": "sum(rate(traefik_service_requests_total{service=~\"demo@docker|direct-.*@docker\",code=~\"5..\"}[1m])) or vector(0)",
           "instant": true,
           "range": false,
           "legendFormat": "5xx"
@@ -198,12 +201,13 @@
         "defaults": {
           "unit": "short",
           "decimals": 0,
+          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
               { "color": "orange", "value": 1 },
-              { "color": "green", "value": 3 }
+              { "color": "green", "value": 5 }
             ]
           }
         },
@@ -249,8 +253,8 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(traefik_entrypoint_requests_total{protocol=\"http\"}[30s]))",
-          "legendFormat": "masuk (Traefik)"
+          "expr": "sum(rate(traefik_service_requests_total{service=~\"demo@docker|direct-.*@docker\"}[30s]))",
+          "legendFormat": "masuk LB (Traefik)"
         },
         {
           "refId": "B",
@@ -339,7 +343,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (code) (rate(traefik_entrypoint_requests_total{protocol=\"http\"}[30s]))",
+          "expr": "sum by (code) (rate(traefik_service_requests_total{service=~\"demo@docker|direct-.*@docker\"}[30s]))",
           "legendFormat": "{{code}}"
         }
       ]

@@ -11,7 +11,7 @@ Empat project compose terpisah, semuanya berbagi network `lb-net`:
 | `lb-traefik` | `docker-compose.traefik.yml` | Traefik saja — pintu masuk semua URL |
 | `lb-demo` | `docker-compose.yml` | 5 backend (`server-1` … `server-5`) |
 | `lb-db` | `docker-compose.db.yml` | MariaDB 11.4 + Adminer |
-| `lb-k6` | `docker-compose.monitoring.yml` | k6, InfluxDB, Grafana, Prometheus, exporter MariaDB, Loki + Alloy |
+| `lb-k6` | `docker-compose.monitoring.yml` | k6, Grafana, Prometheus, exporter MariaDB, Loki + Alloy |
 
 Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diberi label dan menempel di `lb-net` otomatis dapat URL. Grafana dan web dashboard k6 karena itu bisa dibuka lewat `grafana.localhost` dan `k6.localhost`, bukan hanya lewat port. MariaDB dan exporter-nya tetap tanpa rute Traefik: yang dibuka hanya dashboard-nya.
 
@@ -54,14 +54,13 @@ Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diber
           └────────────── lb-net (external) ─────────────────┘
                                project lb-k6
                                ┌───────────────────────────┐
-                               │ Grafana · InfluxDB        │
-                               │ Prometheus · k6-runner    │
-                               │ mysqld-exporter · Loki    │
-                               │ Alloy                     │
+                               │ Grafana · Prometheus      │
+                               │ k6-runner · Loki · Alloy  │
+                               │ mysqld-exporter           │
                                └───────────────────────────┘
 ```
 
-15 container: 1 Traefik, 5 backend, MariaDB + Adminer, serta Grafana + InfluxDB + Prometheus + k6-runner + mysqld-exporter + Loki + Alloy. Network `lb-net` dibuat **di luar compose** (`make net-up`) dan dipakai bersama; masing-masing project bisa naik/turun sendiri.
+14 container: 1 Traefik, 5 backend, MariaDB + Adminer, serta Grafana + Prometheus + k6-runner + mysqld-exporter + Loki + Alloy. Network `lb-net` dibuat **di luar compose** (`make net-up`) dan dipakai bersama; masing-masing project bisa naik/turun sendiri.
 
 ## 2. Struktur project
 
@@ -74,7 +73,7 @@ loadBalancer/
 ├── docker-compose.traefik.yml    # Traefik saja (project lb-traefik, network lb-net external)
 ├── docker-compose.yml            # 5 backend server (project lb-demo)
 ├── docker-compose.db.yml         # MariaDB + Adminer (project lb-db)
-├── docker-compose.monitoring.yml # k6 + InfluxDB + Grafana + Prometheus + exporter + Loki/Alloy (project lb-k6)
+├── docker-compose.monitoring.yml # k6 + Grafana + Prometheus + exporter + Loki/Alloy (project lb-k6)
 ├── db/init/001-schema.sql        # skema registered_servers + seed 5 server
 ├── docker/
 │   ├── backend.Dockerfile        # image backend (Node 22 alpine + mysql2 + HEALTHCHECK)
@@ -106,7 +105,7 @@ loadBalancer/
 │   ├── prometheus/prometheus.yml # scrape Traefik + backend tiap 2 detik + exporter MariaDB
 │   ├── loki/loki.yml             # penyimpanan log, retensi 7 hari
 │   ├── alloy/config.alloy        # kirim log container berlabel lb.logs=true ke Loki
-│   ├── grafana/provisioning/     # datasource InfluxDB/Prometheus/Loki, provider dashboard, alert
+│   ├── grafana/provisioning/     # datasource Prometheus/Loki, provider dashboard, alert
 │   ├── grafana/dashboards/k6/    # k6.json (hasil test)
 │   ├── grafana/dashboards/lb/    # lb-realtime.json (trafik nyata)
 │   ├── grafana/dashboards/db/    # database.json (MariaDB + log)
@@ -139,7 +138,7 @@ Per project, kalau hanya butuh sebagian atau sedang debug:
 | `make db-grant-exporter` | Buat/segarkan user `lb_exporter` tanpa menyentuh data |
 | `make traefik-up` / `traefik-down` | Traefik saja (project `lb-traefik`) |
 | `make docker-up` / `docker-down` | 5 backend saja (project `lb-demo`) |
-| `make k6-up` / `k6-down` | Grafana + InfluxDB + Prometheus + exporter + Loki + Alloy (project `lb-k6`) |
+| `make k6-up` / `k6-down` | Grafana + Prometheus + k6-runner + exporter + Loki + Alloy (project `lb-k6`) |
 | `make traefik-logs` | Access log Traefik (siapa melayani apa) |
 | `make docker-ps` | Status + health container backend |
 | `make docker-logs` | Log 5 backend server |
@@ -303,21 +302,21 @@ Cara membaca angka failover itu:
 
 Semua ada di `docker-compose.monitoring.yml` dengan project sendiri (`lb-k6`), jadi tidak mengganggu stack `lb-demo` maupun `make test`. Grafana dan k6 ikut menempel di `lb-net`, jadi keduanya juga punya URL lewat Traefik.
 
-Ada **tiga sumber data** dengan arti berbeda:
+Ada **dua penyimpan data** untuk tiga dashboard:
 
 | Sumber | Isi | Dashboard |
 |---|---|---|
-| InfluxDB 1.8 | hasil **test k6** (hanya terisi saat `k6-run` / `k6-watch`) | `k6-lb` |
-| Prometheus | **trafik nyata** Traefik + semua backend (ditemukan otomatis lewat Docker), scrape tiap 2 detik | `lb-realtime` |
-| Prometheus + Loki | **kesehatan MariaDB**: status, koneksi, slow query, error CRUD, dan log container | `db-monitoring` |
+| Prometheus (remote write) | hasil **test k6** (terisi saat `k6-run` / `k6-watch` / Trigger, difilter label `run`) | `k6-lb` |
+| Prometheus (scrape 2s) | **trafik nyata** service backend Traefik + `/metrics` semua backend | `lb-realtime` |
+| Prometheus + Loki | **kesehatan MariaDB**: `mysql_up`, koneksi, slow query, error CRUD, dan log container | `db-monitoring` |
 
 ```
 k6 (container) ──HTTP──> traefik:80 (server.localhost)
       │
-      └── output influxdb ──> influxdb:8086 (db `k6`) ──┐
+      └── remote write ──> prometheus:9090 ───────────────┐
                                                           ├──> grafana:3000
 traefik:8080/metrics + server-N:3000/metrics              │
-      └── scrape 2s ──> prometheus:9090 ──────────────────┤
+      └── scrape 2s ────> prometheus:9090 ────────────────┤
 mariadb:3306 ──> mysqld-exporter:9104 ── scrape ──────────┤
 container (lb.logs=true) ──> alloy ──> loki:3100 ─────────┘
 ```
@@ -333,15 +332,15 @@ container (lb.logs=true) ──> alloy ──> loki:3100 ───────�
 | `http://127.0.0.1:5665` | Cadangan: web dashboard k6 lewat port |
 | `http://trigger.localhost/cgi-bin/trigger` | Pemicu Run k6 dari browser (dipakai link "Run k6" di dashboard) |
 
-InfluxDB dan Prometheus **tidak** diekspos ke host maupun lewat Traefik. InfluxDB tidak punya UI; Prometheus hanya dikonsumsi Grafana. Loki, Alloy, dan `mysqld-exporter` juga tanpa port host.
+Prometheus, Loki, Alloy, dan `mysqld-exporter` **tidak** diekspos ke host maupun lewat Traefik; semuanya hanya dikonsumsi Grafana atau runner internal.
 
 | Perintah | Arti |
 |---|---|
-| `make k6-up` | Nyalakan InfluxDB + Grafana + Prometheus + k6-runner + exporter MariaDB + Loki + Alloy (image diunduh/di-build sekali) |
-| `make k6-run` | Jalankan k6 sekali di container, hasil masuk InfluxDB + Grafana |
+| `make k6-up` | Nyalakan Grafana + Prometheus + k6-runner + exporter MariaDB + Loki + Alloy (image diunduh/di-build sekali) |
+| `make k6-run` | Jalankan k6 sekali di container, hasil masuk Prometheus + Grafana |
 | `make k6-watch` | Sama, tapi dashboard web k6 hidup di `http://k6.localhost` / `http://127.0.0.1:5665` dan hasilnya diekspor ke `monitoring/reports/report.html` |
 | `make k6-down` | Matikan stack monitoring (data di volume tetap) |
-| `make k6-logs` | Log InfluxDB/Grafana/k6 |
+| `make k6-logs` | Log Grafana/Prometheus/Loki/k6 |
 
 Alur pemakaian:
 
@@ -355,7 +354,7 @@ make stack-down     # urutan shutdown sudah diurus script
 
 Panel dashboard: total request, request gagal, check lulus, VU maksimum, request/detik, latensi p50/p95/p99, sebaran request per server, dan status code. Ada variabel **Run** untuk memfilter satu eksekusi tertentu — tiap run diberi tag `run` berisi timestamp, jadi run lama tetap bisa dibandingkan.
 
-Sebaran per server memakai satu metric `served` dengan tag `server` (bukan satu metric per server), dan panelnya satu query `GROUP BY "server"`. Jadi server baru otomatis muncul tanpa menyunting skrip k6 atau dashboard. Konsekuensinya, ringkasan konsol k6 hanya menampilkan total `served`, bukan per server.
+Sebaran per server memakai satu metric `served` (`k6_served_total` di Prometheus) dengan label `server`, dan panelnya satu query `sum by (server) (...)`. Jadi server baru otomatis muncul tanpa menyunting skrip k6 atau dashboard. Konsekuensinya, ringkasan konsol k6 hanya menampilkan total `served`, bukan per server.
 
 ### 7a. Dashboard realtime `lb-realtime` (Prometheus)
 
@@ -365,7 +364,7 @@ Sumber angkanya dua, dan bedanya penting:
 
 | Metrik | Dari | Arti |
 |---|---|---|
-| `traefik_entrypoint_requests_total` | Traefik | request yang **masuk** ke Traefik (termasuk yang nanti gagal) |
+| `traefik_service_requests_total` | Traefik | request khusus service LB/backend (`demo@docker`, `direct-*`), tidak tercemar trafik Grafana/Adminer/scrape |
 | `lb_backend_requests_total` | tiap backend | request yang **benar-benar diterima** server |
 | `lb_backend_request_duration_seconds` | tiap backend | histogram durasi, dipakai untuk p95 |
 | `up{job=...}` | Prometheus | target scrape hidup atau mati |
@@ -374,9 +373,9 @@ Panel (12):
 
 | Panel | Query inti |
 |---|---|
-| Total request berhasil (2xx) | `sum(increase(traefik_entrypoint_requests_total{code=~"2.."}[$__range]))` |
-| Total request error (4xx + 5xx) | `sum(increase(...{code=~"4..\|5.."}[$__range]))` |
-| Request masuk / detik | `sum(rate(traefik_entrypoint_requests_total{protocol="http"}[30s]))` |
+| Total request LB berhasil (2xx) | `sum(increase(traefik_service_requests_total{service=~"demo@docker\|direct-.*@docker",code=~"2.."}[$__range]))` |
+| Total request LB error (4xx + 5xx) | `sum(increase(...{code=~"4..\|5.."}[$__range]))` |
+| Request LB masuk / detik | `sum(rate(traefik_service_requests_total{service=~"demo@docker\|direct-.*@docker"}[30s]))` |
 | Request diterima / detik | `sum(rate(lb_backend_requests_total[30s]))` |
 | Error 5xx / detik | `rate(...{code=~"5.."}[1m])` |
 | Backend sehat | `sum(max by (server) (up{job="backend"}))` (0 sampai jumlah backend) |
@@ -408,7 +407,7 @@ docker compose -p lb-k6 -f docker-compose.monitoring.yml run --rm -e DURATION=60
 docker compose -p lb-k6 -f docker-compose.monitoring.yml run --rm k6 run failover.js
 ```
 
-Catatan jujur soal versi: k6 v2.4.0 menandai output `influxdb` (dan `experimental-prometheus-rw`) sebagai **deprecated**, rencananya dihapus di k6 v3 dan diganti OpenTelemetry. Untuk demo ini tetap dipakai karena paling stabil dan dashboard-nya sudah terbukti berisi data; kalau nanti pindah ke k6 v3, ganti ke output OpenTelemetry + datasource Prometheus/Tempo.
+Catatan jujur soal versi: k6 v2.4.0 menandai output `experimental-prometheus-rw` sebagai **deprecated**, rencananya dihapus di k6 v3 dan diganti OpenTelemetry. Untuk demo ini dipakai karena tidak memerlukan kolektor tambahan di depan Prometheus; kalau nanti pindah ke k6 v3, arahkan output OpenTelemetry ke endpoint OTLP Prometheus/Alloy.
 
 Hasil terukur dari container (`make k6-run`, 15 detik, 100 req/detik):
 
@@ -427,9 +426,9 @@ report.html (k6-watch): 167 KB
 Grafana tidak bisa menjalankan perintah sendiri (tidak ada plugin self-hosted untuk itu, dan endpoint Actions tidak tersedia di 13.3.1). Yang dipakai: **link dashboard** yang memanggil service kecil `k6-runner`.
 
 - Di dashboard `k6-lb`, pojok kanan atas ada link **"Run k6 (15 detik)"**.
-- Klik → browser membuka `http://trigger.localhost/cgi-bin/trigger` → satu Run k6 dimulai → halaman redirect ke dashboard setelah 2 detik → panel terisi.
-- Parameter tetap: 100 req/detik, 15 detik, skrip `load-test.js`. Hasil masuk InfluxDB dengan tag `run` baru, jadi bisa dibandingkan dengan run sebelumnya lewat variabel **Run**.
-- Hanya **satu Run pada satu waktu**. Klik kedua saat masih berjalan dibalas halaman "Run masih berjalan", bukan antrean.
+- Klik → browser membuka halaman konfirmasi `http://trigger.localhost/cgi-bin/trigger` (`GET` aman dari prefetch/reload) → klik tombol **Jalankan Run sekarang** (`POST`) → satu Run k6 dimulai → halaman redirect ke dashboard setelah 2 detik.
+- Parameter tetap: 100 req/detik, 15 detik, skrip `load-test.js`. Hasil masuk Prometheus dengan label `run` baru, jadi bisa dibandingkan dengan run sebelumnya lewat variabel **Run**.
+- Hanya **satu Run pada satu waktu**; `/tmp` memakai `tmpfs` sehingga lock tidak pernah tertinggal permanen saat container restart.
 - Log run: `docker exec lb-k6-k6-runner-1 tail -20 /tmp/k6-run.log`.
 
 Kenapa begini:
@@ -463,7 +462,7 @@ backend /metrics (lb_db_*) ─────────────────�
 | Prometheus | `up{job="mariadb"}` | target exporter hidup (0 = DB/exporter bermasalah) |
 | Loki | log `{project="lb-db"}` dan `{project="lb-demo"}` | error/warning asli dari container, bukan tebakan |
 
-Empat alert Grafana (provisioning, tanpa Alertmanager): `mariadb-down` (critical, 30s), `mariadb-connections-high`, `mariadb-slow-queries`, `api-db-errors`. Belum ada contact point keluar — statusnya dilihat di Grafana. Cara menambah email/Telegram ada di panduan.
+Tujuh alert Grafana (provisioning, tanpa Alertmanager): tiga untuk Load Balancer (`lb-backend-down`, `lb-backend-degraded`, `lb-5xx-spike`) dan empat untuk database (`mariadb-down` memakai `min(mysql_up) * up{job="mariadb"}`, `mariadb-connections-high`, `mariadb-slow-queries`, `api-db-errors`). Belum ada contact point keluar — statusnya dilihat di Grafana. Cara menambah email/Telegram ada di panduan.
 
 `make db-up` dan `db-reset` otomatis menjalankan `make db-grant-exporter`, jadi volume database lama tidak perlu dihapus untuk mengaktifkan monitoring.
 
@@ -527,7 +526,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | `make stack-up` dijalankan ulang | **idempotent**: "network lb-net sudah ada", container yang sudah hidup tidak dibuat ulang |
 | Dashboard `lb-realtime` saat backend hidup | 10 panel berisi data; scrape 6 target (`traefik` + 5 backend) `up=1` |
 | 30 request manual ke `server.localhost` | test mengukur 6 request per server, tanpa gagal |
-| Klik "Run k6" di dashboard Grafana | trigger 200 → Run 15 detik selesai (1500 request) → tag `run` baru muncul di InfluxDB; klik kedua saat run berjalan dibalas halaman "Run masih berjalan" |
+| Klik "Run k6" di dashboard Grafana | halaman konfirmasi `GET` 200 → submit `POST` 202 → Run 15 detik selesai (1500 request) → label `run` baru muncul di Prometheus; klik kedua saat run berjalan dibalas 409 "Run masih berjalan" |
 | Tambah `server-4` di compose saja | Prometheus menemukan target `server-4` otomatis (`up=1`), panel `lb-realtime` dan sebaran k6 bertambah tanpa menyunting config monitoring |
 | Panel total `lb-realtime` (range 15m) | berhasil 16.997 · error 19; setelah 3 request 404 (server-2 dimatikan) error naik ke 22 |
 | CRUD lintas backend | POST lewat `server.localhost` dilayani `server-5` (201); GET id yang sama lewat `server-3.localhost` mengembalikan data identik (`x-served-by: server-3`) |
@@ -555,17 +554,17 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - `db/init/001-schema.sql` hanya dijalankan saat volume `lb-db-data` kosong. Perubahan skema pada volume lama butuh `make db-reset`, yang **menghapus data**.
 - `docker.sock` di-mount read-only, tapi tetap memberi akses ke Docker API — hanya untuk demo lokal, jangan diekspos ke internet.
 - Dashboard `api.insecure=true` tanpa login di port 8089 **dan** di `http://traefik.localhost/dashboard/`. Endpoint `/metrics` Traefik juga ikut terbuka di sana (port 8080 tidak dipublikasikan, tapi 8089 memuat API yang sama).
-- Grafana memakai kredensial default `admin/admin` dan viewer anonim; InfluxDB tanpa autentikasi dan tidak dipublikasikan ke host. Hanya untuk lokal.
+- Grafana memakai kredensial default `admin/admin` dan viewer anonim. Hanya untuk lokal.
 - Prometheus tanpa autentikasi dan tanpa port publik — hanya bisa diakses dari network `lb-net` / `lb-k6-net`. Retensi 7 hari. Loki juga tanpa auth, tanpa port host, retensi 7 hari.
-- User `lb_exporter` memakai password demo (`lb_exporter_password`) dan punya `PROCESS` + `REPLICATION CLIENT` pada semua database. Ganti lewat `MARIADB_EXPORTER_PASSWORD` + `make db-grant-exporter` bila perlu.
-- Alert database dikelola Grafana dan **belum punya contact point**: status firing hanya terlihat di Grafana, tidak ada email/Telegram/webhook. Slow query log MariaDB juga belum diaktifkan, jadi `slow_queries` adalah status server.
-- Loki menyimpan **semua** baris log container yang diberi label `lb.logs=true` (MariaDB + backend), bukan hanya error. Retensi 7 hari membatasi pertumbuhan.
-- Grafana hanya membaca ulang datasource/dashboard/alert provisioning saat start, dan Prometheus tidak memuat ulang `prometheus.yml` otomatis. Setelah mengubah file itu: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana` dan/atau `docker restart lb-k6-prometheus-1`.
-- Data monitoring disimpan di volume Docker (`influxdb-data`, `prometheus-data`, `loki-data`, `alloy-data`, `grafana-data`); `make k6-down` tidak menghapusnya, `... down -v` menghapusnya.
+- User `lb_exporter` memakai password demo (`lb_exporter_password`) dan punya `PROCESS` + `REPLICATION CLIENT` + `SLAVE MONITOR` pada semua database. Ganti lewat `MARIADB_EXPORTER_PASSWORD` + `make db-grant-exporter` bila perlu.
+- Alert dikelola Grafana dan **belum punya contact point**: status firing hanya terlihat di Grafana, tidak ada email/Telegram/webhook. Slow query log MariaDB juga belum diaktifkan, jadi `slow_queries` adalah status server.
+- Loki menyimpan baris log container yang diberi label `lb.logs=true` (MariaDB, semua backend, serta access log error/lambat Traefik). Retensi 7 hari membatasi pertumbuhan.
+- Grafana hanya membaca ulang datasource/dashboard/alert provisioning saat start. Prometheus otomatis memuat ulang perubahan `prometheus.yml` (`--config.auto-reload`), sedangkan perubahan provisioning Grafana butuh `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`.
+- Data monitoring disimpan di volume Docker (`prometheus-data`, `loki-data`, `alloy-data`, `grafana-data`); `make k6-down` tidak menghapusnya, `... down -v` menghapusnya.
 - Metrik backend disimpan di memori proses: counter kembali 0 setiap container backend dibuat ulang, dan Prometheus ikut melihatnya sebagai reset (rate tetap benar, angka total tidak). Ini termasuk `lb_db_*`.
 - Scrape 2 detik berarti puncak trafik yang lebih pendek dari 2 detik bisa terlewat. Ini kompromi "cukup realtime" vs beban scrape.
-- Pemicu `trigger.localhost` tanpa autentikasi dan hanya menjaga single-flight: siapa pun yang bisa membuka host itu (termasuk viewer anonim Grafana) bisa memulai Run. Parameter Run juga tetap, tidak bisa diubah dari UI.
-- Runner memegang binary k6 dan menjalankan tepat satu Run per klik; tidak ada antrean, tidak ada riwayat status selain tag `run` di InfluxDB dan `/tmp/k6-run.log` di dalam container.
+- Pemicu `trigger.localhost` tanpa autentikasi, mewajibkan `POST` (konfirmasi di halaman `GET`), dan hanya menjaga single-flight: siapa pun yang bisa mengakses host itu bisa memulai Run. Parameter Run juga tetap, tidak bisa diubah dari UI.
+- Runner memegang binary k6 dan menjalankan tepat satu Run per submit; tidak ada antrean, tidak ada riwayat status selain label `run` di Prometheus dan `/tmp/k6-run.log` di dalam container (`tmpfs`).
 - Prometheus memegang `docker.sock` read-only dan berjalan sebagai root hanya untuk penemuan target. Container tanpa label `lb.monitor=true` tidak akan dipantau, walau ada di `lb-net`.
 - Riwayat k6 terputus sekali: run sebelum metric `served` diperkenalkan memakai `served_server_N` dan tidak lagi tampil di panel sebaran. Run baru memakai `served` + tag `server`.
 - Panel total (`2xx`, `4xx+5xx`) memakai `increase(...[$__range])`, jadi angkanya ikut rentang waktu dashboard, bukan total seumur hidup. Counter Traefik reset saat container Traefik dibuat ulang.
@@ -590,7 +589,7 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | Ingin bersih total (termasuk image) | `make clean` — sama dengan `make stack-down`, lalu menghapus image lokal `lb-demo`. Volume tidak disentuh. |
 | `k6 belum terpasang` | `make k6-install` (butuh Bun + akses GitHub). |
 | `k6-install` gagal HTTP 403 | Rate limit GitHub API; tunggu beberapa menit atau unduh manual rilis k6. |
-| Grafana kosong / "No data" | Pastikan sudah ada run: `make k6-run`. Cek datasource: `http://grafana.localhost/api/datasources` harus berisi `k6-influxdb`. Cek data: `docker compose -p lb-k6 -f docker-compose.monitoring.yml exec -T influxdb influx -database k6 -execute 'SHOW MEASUREMENTS'`. |
+| Dashboard `k6-lb` kosong / "No data" | Pastikan sudah ada run: `make k6-run`. Cek datasource: `http://grafana.localhost/api/datasources` harus berisi `prometheus` (`isDefault: true`), dan rentang waktu dashboard mencakup waktu Run. |
 | Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards/k6` dan `.../lb`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `make k6-logs`. |
 | `lb-realtime` kosong / "No data" | Datasource `prometheus` belum ada atau Prometheus mati. Cek `http://grafana.localhost/api/datasources` (harus ada uid `prometheus`), lalu `make k6-up`. |
 | Panel "Status target scrape" merah (DOWN) | Target tidak bisa di-scrape. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml logs prometheus`. Penyebab umum: backend mati, atau Prometheus tidak menempel di `lb-net` (`make k6-down && make k6-up`). |
@@ -604,7 +603,7 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | `adminer.localhost` tidak resolve | DNS OS tidak menangani nama itu. Tambahkan `127.0.0.1 adminer.localhost` ke hosts file, atau langsung pakai `http://127.0.0.1:8081`. |
 | `k6.localhost` balas 404 | Normal kalau k6 tidak sedang jalan — router hanya ada selama `make k6-watch`. |
 | Link "Run k6" di Grafana tidak berefek / `trigger.localhost` 404 | `k6-runner` belum jalan: `make k6-up`. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml ps k6-runner` dan log container-nya. |
-| Klik "Run k6" tapi dashboard tidak terisi | Lihat log run: `docker exec lb-k6-k6-runner-1 tail -30 /tmp/k6-run.log`. Cek `K6_OUT` menunjuk `http://influxdb:8086/k6` dan runner ada di network `lb-k6-net` + `lb-net`. |
+| Submit "Run k6" tapi dashboard tidak terisi | Lihat log run: `docker exec lb-k6-k6-runner-1 tail -30 /tmp/k6-run.log`. Cek `K6_PROMETHEUS_RW_SERVER_URL` menunjuk `http://prometheus:9090/api/v1/write` dan runner ada di network `lb-k6-net` + `lb-net`. |
 | Klik "Run k6" dibalas "Run masih berjalan" padahal tidak ada run | Lock tertinggal setelah runner mati di tengah run: `docker exec lb-k6-k6-runner-1 rmdir /tmp/k6.lock` (atau restart container). |
 | `k6-watch` tidak bisa dibuka di 5665 | `docker compose run` tidak mempublikasikan port kecuali `--service-ports` — script sudah memakainya. Pastikan port 5665 bebas. |
 | `report.html` tidak dibuat | k6 melewati ekspor bila run terlalu pendek ("not enough data"): butuh durasi > 3× `K6_WEB_DASHBOARD_PERIOD` (di sini 2s → minimal ~6s). |

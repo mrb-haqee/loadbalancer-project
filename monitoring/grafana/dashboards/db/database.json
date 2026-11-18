@@ -58,7 +58,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "up{job=\"mariadb\"}",
+          "expr": "(min(mysql_up{job=\"mariadb\"}) * min(up{job=\"mariadb\"})) or vector(0)",
           "instant": true,
           "legendFormat": "MariaDB",
           "range": false,
