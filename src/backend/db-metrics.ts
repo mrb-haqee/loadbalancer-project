@@ -7,24 +7,26 @@
 // - lb_db_query_duration_seconds (histogram)
 // - lb_db_errors_total{code}
 
+import { driverErrorCode } from './db-errors';
+
 const DURATION_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5];
 
-const queryCounts = new Map();
-const errorCounts = new Map();
-const durationBucketCounts = new Array(DURATION_BUCKETS.length).fill(0);
+const queryCounts = new Map<string, number>();
+const errorCounts = new Map<string, number>();
+const durationBucketCounts = new Array<number>(DURATION_BUCKETS.length).fill(0);
 let durationSum = 0;
 let durationCount = 0;
 
-function escapeLabel(value) {
-  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+function escapeLabel(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
 /** Kode error dibatasi panjangnya; kode tak dikenal tetap terlihat sebagai UNKNOWN. */
-function normalizeCode(code) {
-  return code ? String(code).slice(0, 48) : 'UNKNOWN';
+function normalizeCode(code: string | undefined): string {
+  return code ? code.slice(0, 48) : 'UNKNOWN';
 }
 
-function record(operation, result, seconds, code) {
+function record(operation: string, result: 'success' | 'error', seconds: number, code?: string): void {
   const key = `${operation}|${result}`;
   queryCounts.set(key, (queryCounts.get(key) ?? 0) + 1);
 
@@ -44,20 +46,20 @@ function record(operation, result, seconds, code) {
  * Menjalankan satu query dan mencatat durasi + hasilnya.
  * `operation` adalah nama pendek: list, get, insert, update, delete.
  */
-export async function measureDbQuery(operation, run) {
+export async function measureDbQuery<T>(operation: string, run: () => Promise<T>): Promise<T> {
   const startedAt = process.hrtime.bigint();
   try {
     const value = await run();
     record(operation, 'success', Number(process.hrtime.bigint() - startedAt) / 1e9);
     return value;
   } catch (error) {
-    record(operation, 'error', Number(process.hrtime.bigint() - startedAt) / 1e9, error?.code);
+    record(operation, 'error', Number(process.hrtime.bigint() - startedAt) / 1e9, driverErrorCode(error));
     throw error;
   }
 }
 
 /** Hanya dipakai unit test supaya tiap test mulai dari nol. */
-export function resetDbMetrics() {
+export function resetDbMetrics(): void {
   queryCounts.clear();
   errorCounts.clear();
   durationBucketCounts.fill(0);
@@ -65,7 +67,7 @@ export function resetDbMetrics() {
   durationCount = 0;
 }
 
-export function renderDbMetrics(serverId) {
+export function renderDbMetrics(serverId: string): string {
   const server = `server="${escapeLabel(serverId)}"`;
   const lines = [
     '# HELP lb_db_queries_total Query database yang dijalankan backend ini.',

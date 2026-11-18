@@ -32,7 +32,7 @@ Traefik hanya menambah rute bila Traefik hidup.
 ```bash
 make net-up     # sekali: network lb-net
 make db-up      # 3 node -> grant user -> clone replika -> MaxScale + Adminer
-make docker-up  # 5 backend (project lb-demo), image memuat driver mysql2
+make docker-up  # 5 backend (project lb-demo), image Bun + Elysia + Drizzle/Bun SQL
 ```
 
 Semua sekaligus:
@@ -285,7 +285,7 @@ Aturannya:
   tetap 1000 entitas.
 - Nama entitas selalu berprefix `crud-<runId>-<nomor>` sehingga tidak bentrok dengan seed
   `server-1`…`server-5` maupun dengan run lain yang berjalan bersamaan.
-- Field lain acak tetapi tetap valid menurut `src/backend/servers/validation.js`: host
+- Field lain acak tetapi tetap valid menurut `src/backend/servers/validation.ts`: host
   `10.x.y.z`, port 1–65535, bobot 1–100, `enabled` acak, catatan ≤ 255 karakter.
   Generator sengaja tidak memakai library tambahan.
 - Setiap langkah diperiksa, bukan hanya status: `POST` harus 201 + `Location`, `GET` harus

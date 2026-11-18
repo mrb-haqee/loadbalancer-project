@@ -80,7 +80,7 @@ help:
 	@echo     make k6-logs           Log Grafana/Prometheus/Loki/k6
 	@echo   Test:
 	@echo     make test              Test Docker end-to-end - butuh Docker
-	@echo     make test-backend      Unit test validasi CRUD + metrik DB - tanpa Docker
+	@echo     make test-backend      Unit test bun:test (kontrak HTTP + validasi + metrik) - tanpa Docker
 	@echo     make test-docker       Sama dengan make test
 	@echo     make test-db           Uji failover database sungguhan - mematikan primary
 	@echo     make crud-load         Uji CRUD acak: COUNT=100 USERS=10 MODE=full
@@ -207,7 +207,7 @@ test:
 test-docker: test
 
 test-backend:
-	$(NODE) --test --test-reporter=spec "test/backend/*.test.js"
+	$(BUN) test test/backend
 
 test-db:
 	$(NODE) --test --test-reporter=spec test/docker/db-failover.test.js

@@ -1,11 +1,11 @@
-FROM node:22-alpine
+FROM oven/bun:1.3-alpine
 
 WORKDIR /app
 
-# Satu-satunya dependency runtime: driver MariaDB (mysql2).
-# src/backend/public/index.html ikut tersalin bersama folder src.
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
+# Runtime hanya butuh elysia + drizzle-orm. Bun menjalankan .ts langsung,
+# jadi tidak ada tahap build/tsc di image.
+COPY package.json bun.lock ./
+RUN bun install --production --frozen-lockfile
 
 COPY config.json ./
 COPY src ./src
@@ -19,6 +19,6 @@ EXPOSE 3000
 # Docker menandai container "unhealthy" bila /health gagal;
 # Traefik memakai status ini untuk mengeluarkan container dari rotasi.
 HEALTHCHECK --interval=2s --timeout=2s --start-period=5s --retries=2 \
-  CMD node -e "fetch('http://127.0.0.1:' + (process.env.BACKEND_PORT || 3000) + '/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+  CMD bun -e "fetch('http://127.0.0.1:' + (process.env.BACKEND_PORT || 3000) + '/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
-CMD ["node", "src/backend/server.js"]
+CMD ["bun", "src/backend/server.ts"]

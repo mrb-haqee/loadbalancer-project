@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+export type BackendConfig = {
+  id: string;
+  host: string;
+  port: number;
+};
+
 /**
  * Satu sumber identitas backend.
  * Di container, identitas sebenarnya datang dari env (BACKEND_ID/BACKEND_HOST/
@@ -11,19 +17,17 @@ const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'
  * fallback saat backend dijalankan langsung tanpa env.
  * CONFIG_PATH dipakai bila ingin menunjuk file konfigurasi lain.
  */
-export function resolveConfigPath() {
-  return process.env.CONFIG_PATH
-    ? resolve(process.env.CONFIG_PATH)
-    : resolve(PROJECT_ROOT, 'config.json');
+export function resolveConfigPath(): string {
+  return process.env.CONFIG_PATH ? resolve(process.env.CONFIG_PATH) : resolve(PROJECT_ROOT, 'config.json');
 }
 
-export function loadConfig() {
+export function loadConfig(): { configPath: string; backends: BackendConfig[] } {
   const path = resolveConfigPath();
-  const raw = JSON.parse(readFileSync(path, 'utf8'));
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as { backends?: Array<Partial<BackendConfig>> };
   const backends = (raw.backends ?? []).map((backend, index) => ({
     id: backend.id ?? `server-${index + 1}`,
     host: backend.host ?? '127.0.0.1',
-    port: backend.port,
+    port: backend.port as number,
   }));
 
   if (!backends.length) {

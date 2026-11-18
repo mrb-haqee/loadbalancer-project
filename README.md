@@ -4,6 +4,8 @@ Load balancer yang membagi trafik ke **5 backend server** memakai **Traefik 3.6*
 
 Semua dibuat dari nol di folder ini. **Tidak menyentuh project yang sudah ada**: project compose sendiri, network sendiri (`lb-net`), port sendiri (80/8088/8089). Jadi `proxy`, `sanmedclinic_internal`, `shared-api`, dan container lama `traefik-traefik-1` tidak tersentuh.
 
+Backend berjalan di **Bun 1.3** dengan **Elysia 1.4** dan **Drizzle ORM** di atas `Bun.SQL` (driver MySQL/MariaDB bawaan Bun). Tidak ada tahap build: image menjalankan `bun src/backend/server.ts` langsung, `tsc --noEmit` hanya untuk typecheck. Keputusan lengkapnya di [`docs/adr/0015-elysia-drizzle-bun.md`](docs/adr/0015-elysia-drizzle-bun.md).
+
 Empat project compose terpisah, semuanya berbagi network `lb-net`:
 
 | Project | File | Isi |
@@ -69,26 +71,30 @@ loadBalancer/
 ├── .env.example                  # contoh kredensial DB (salin ke .env bila perlu)
 ├── config.json                   # peta identitas backend (dipakai saat backend jalan tanpa env)
 ├── Makefile                      # semua perintah operasional: stack, db, traefik, test, k6
-├── package.json                  # metadata Node + dependency mysql2 (tanpa script)
+├── package.json                  # dependency Bun: elysia + drizzle-orm (tanpa script)
+├── bun.lock                      # lockfile Bun (dipakai `bun install --frozen-lockfile` di image)
+├── tsconfig.json                 # typecheck `bunx tsc --noEmit`; runtime tetap Bun tanpa build
 ├── docker-compose.traefik.yml    # Traefik saja (project lb-traefik, network lb-net external)
 ├── docker-compose.yml            # 5 backend server (project lb-demo)
 ├── docker-compose.db.yml         # 3 MariaDB + MaxScale + Adminer (project lb-db)
 ├── docker-compose.monitoring.yml # k6 + Grafana + Prometheus + 3 exporter + Loki/Alloy (project lb-k6)
 ├── db/init/001-schema.sql        # skema registered_servers + seed 5 server
 ├── docker/
-│   ├── backend.Dockerfile        # image backend (Node 22 alpine + mysql2 + HEALTHCHECK)
+│   ├── backend.Dockerfile        # image backend (oven/bun:1.3-alpine + HEALTHCHECK)
 │   ├── maxscale/maxscale.cnf     # router master + monitor failover (bukan config Traefik)
 │   └── traefik/traefik.yml       # config statis Traefik (provider Docker, timeout backend, dashboard, access log)
 ├── src/
-│   ├── backend/server.js         # aplikasi backend (dijalankan 5x, beda BACKEND_ID)
-│   ├── backend/http.js           # helper respons JSON/HTML + pembatas body
-│   ├── backend/db.js             # pool koneksi mysql2 (lazy, timeout 1 detik)
-│   ├── backend/db-metrics.js     # metrik query DB yang diekspor lewat /metrics
-│   ├── backend/servers/          # validasi, repository, dan route /api/servers
+│   ├── backend/server.ts         # entrypoint: listen + shutdown (dijalankan 5x, beda BACKEND_ID)
+│   ├── backend/app.ts            # aplikasi Elysia: route, error mapping, /metrics
+│   ├── backend/http.ts           # helper respons JSON/HTML + pembatas body 64 KB
+│   ├── backend/db.ts             # pool Bun SQL ke MaxScale + Drizzle (lazy, timeout 1 detik)
+│   ├── backend/schema.ts         # cermin bertipe tabel registered_servers (SQL init tetap sumbernya)
+│   ├── backend/db-metrics.ts     # metrik query DB yang diekspor lewat /metrics
+│   ├── backend/servers/          # validasi, repository Drizzle, dan kontrak /api/servers
 │   ├── backend/public/index.html # UI CRUD katalog di /ui
-│   └── shared/                   # loader config.json + logger
+│   └── shared/                   # loader config.json + logger (TypeScript)
 ├── test/
-│   ├── backend/                  # unit test validasi (tanpa Docker/DB)
+│   ├── backend/                  # unit test `bun:test` (tanpa Docker/DB)
 │   └── docker/
 │       ├── helpers/docker-stack.js  # start/stop stack compose untuk test
 │       ├── helpers/db-stack.js      # peran node, replikasi, SQL lewat MaxScale
@@ -124,7 +130,7 @@ loadBalancer/
 
 ## 3. Menjalankan
 
-Semua perintah operasional ada di `Makefile`. Butuh **GNU Make** (Windows: `choco install make` atau GnuWin32 Make; Linux: paket `make`; macOS: `xcode-select --install`). `make` tanpa argumen menampilkan daftar target.
+Semua perintah operasional ada di `Makefile`. Butuh **GNU Make** (Windows: `choco install make` atau GnuWin32 Make; Linux: paket `make`; macOS: `xcode-select --install`). `make` tanpa argumen menampilkan daftar target. **Bun** hanya dibutuhkan di host untuk `make test-backend` dan pembungkus k6; menjalankan stack tidak butuh Bun lokal karena image sudah memuatnya.
 
 Cara normal — satu perintah untuk semuanya:
 
@@ -221,7 +227,8 @@ Dashboard lain memakai pola yang sama, hanya beda host dan port:
 
 ```bash
 make test          # sama dengan make test-docker (butuh Docker)
-make test-backend  # unit test validasi CRUD + metrik DB, tanpa Docker/DB
+make test-backend  # unit test `bun:test`: validasi, kontrak HTTP Elysia, metrik DB
+make test-db       # failover MariaDB sungguhan (butuh Docker, ±3 menit)
 ```
 
 ```
@@ -403,7 +410,7 @@ sementara `/metrics` dan `/health` sengaja dikecualikan dari counter backend aga
 tidak tercemar probe 2 detik. Trafik ke Grafana, Adminer, dan pemicu k6 tidak masuk panel
 aplikasi sama sekali; ia punya panel sendiri di baris terakhir.
 
-Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/server.js`), berisi counter `lb_backend_requests_total`, `lb_backend_slow_requests_total`, histogram `lb_backend_request_duration_seconds`, serta metrik query database `lb_db_*` (lihat bagian 7c). Bisa dicek langsung:
+Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/metrics.ts` + `src/backend/db-metrics.ts`), berisi counter `lb_backend_requests_total`, `lb_backend_slow_requests_total`, histogram `lb_backend_request_duration_seconds`, serta metrik query database `lb_db_*` (lihat bagian 7c). Bisa dicek langsung:
 
 ```bash
 curl http://server-1.localhost/metrics
@@ -523,7 +530,7 @@ Kredensial demo: database `lb_demo`, user `lb_app`, password `lb_app_password` (
 
 - **Nama bukan peran.** `mariadb-primary` hanya menandai peran **awal**. Setelah failover, primary bisa `mariadb-replica-1`. Skrip dan dashboard mencari primary dari `@@read_only`, bukan dari nama service.
 - **Replika tidak melayani klien.** MaxScale memakai router `readconnroute` dengan `router_options=master`: setiap koneksi — baca maupun tulis — hanya ke node yang sedang menjadi primary. Baca dari replika asinkron berarti `POST` lalu `GET` bisa mengembalikan data lama atau 404.
-- **Driver tidak tahu soal cluster.** `mysql2` 3.24.6 tidak punya mode multi-host/failover. Karena itu `DB_HOST=maxscale` dan `DB_PORT=4006` di `docker-compose.yml`: aplikasi hanya pernah tahu satu alamat, dan MaxScale yang memindahkannya.
+- **Driver tidak tahu soal cluster.** `Bun.SQL` (driver MySQL/MariaDB bawaan Bun) juga tidak punya mode multi-host/failover. Karena itu `DB_HOST=maxscale` dan `DB_PORT=4006` di `docker-compose.yml`: aplikasi hanya pernah tahu satu alamat, dan MaxScale yang memindahkannya.
 - **Failover otomatis, rejoin manual.** `auto_failover=true` mempromosikan replika dengan GTID paling maju. `auto_rejoin=false` disengaja: primary lama yang kembali bisa membawa tulisan yang tidak pernah sampai ke replika. Memasukkannya kembali butuh `make db-rejoin`.
 - **Replika menolak tulisan aplikasi.** `read_only=ON` sejak start, dan `lb_app` tidak punya `SUPER` (MariaDB tidak mengenal `super_read_only`; root tetap bisa menulis).
 - **Node yang dipromosikan menulis binlog** (`--log-slave-updates=ON`), supaya replika lain bisa melanjutkan replikasi dari sana.
@@ -561,7 +568,7 @@ Validasi: `name` unik 1–64 karakter, `host` 1–255 tanpa spasi, `port` 1–65
 Tiga hal yang sengaja begitu:
 
 - **Katalog bukan rotasi.** Menambah/menghapus baris tidak mengubah server yang dipakai Traefik; rotasi tetap dari label container. UI menuliskan ini terang-terangan.
-- **`/health` tidak mengecek DB.** Kalau MariaDB mati, semua backend tetap sehat dan endpoint demo tetap jalan; hanya CRUD yang membalas 503. `connectTimeout` driver 1 detik membuat klien menerima 503 sebelum `responseHeaderTimeout` Traefik (2 detik) berubah jadi 504.
+- **`/health` tidak mengecek DB.** Kalau MariaDB mati, semua backend tetap sehat dan endpoint demo tetap jalan; hanya CRUD yang membalas 503. `connectionTimeout` Bun SQL 1 detik membuat klien menerima 503 sebelum `responseHeaderTimeout` Traefik (2 detik) berubah jadi 504.
 - **State dibagi bersama.** Semua replika memakai satu database: tulis lewat `server.localhost`, baca lewat `server-3.localhost`, datanya sama. Header `x-served-by` di setiap respons menunjukkan backend yang melayani.
 
 Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`docs/database-crud.md`](docs/database-crud.md). Cara memantau kesehatan database dan membaca log error ada di [`docs/database-monitoring.md`](docs/database-monitoring.md).
@@ -593,7 +600,8 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | Primary lama hidup tanpa rejoin | MaxScale tetap melayani node baru (`server_id` pindah, bukan balik) — `auto_rejoin=false` terbukti |
 | Tulis langsung ke replika sebagai `lb_app` | ditolak `ERROR 1290 ... read-only` |
 | Data bercabang di primary lama | **hilang** setelah rejoin (dibuang, bukan digabung); jumlah node bisa ditulis tetap 1 |
-| `make test-db` | **7/7 lulus** dalam **186 detik** (failover + restart promoted primary + rejoin) |
+| `make test-backend` | **29/29 lulus** dalam **±0,3 detik** (`bun test`): kontrak HTTP Elysia, validasi, metrik, pemetaan error DB |
+| `make test-db` | **7/7 lulus** dalam **167 detik** (failover + restart promoted primary + rejoin) |
 | MariaDB dimatikan saat CRUD | **503** `DATABASE_UNAVAILABLE` dalam **1,1 detik** lewat Traefik; `/health` tetap **200**; GET kembali **200** setelah DB hidup |
 | Adminer | `http://adminer.localhost` → **200** (login server `maxscale`, user `lb_app` melihat `registered_servers`); cadangan `127.0.0.1:8081` → **200**; tidak ada node DB yang punya port host |
 | Validasi & konflik | port 0 → **400** + `details`; nama `server-1` duplikat → **409**; id tak ada → **404**; PATCH koleksi → **405** + `Allow` |
@@ -622,7 +630,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - **`auto_rejoin=false`**: node yang kembali harus di-rejoin manual, dan datanya yang bercabang dibuang. Tidak ada penggabungan otomatis, dan itu memang tidak mungkin dilakukan dengan benar.
 - Password `lb_monitor` dan `lb_app` ditulis **dua kali**: di `.env` (`MARIADB_MONITOR_PASSWORD`, `MARIADB_PASSWORD`) dan di `docker/maxscale/maxscale.cnf`, karena MaxScale tidak membaca env. Ganti keduanya lalu `make db-grant-users` + restart MaxScale.
 - `lb_app` punya `SELECT` pada `mysql.*`. Itu dibutuhkan MaxScale untuk menyusun cache autentikasi; isi database aplikasi tetap dibatasi `GRANT ... ON lb_demo.*`.
-- Listener MaxScale di demo ini **tanpa TLS**, sehingga klien MariaDB 11.4 perlu `--skip-ssl` saat menyambung langsung (backend Node tidak terpengaruh: `mysql2` tidak memaksa TLS).
+- Listener MaxScale di demo ini **tanpa TLS**, sehingga klien MariaDB 11.4 perlu `--skip-ssl` saat menyambung langsung (backend tidak terpengaruh: koneksi `Bun.SQL` ke MaxScale tidak memaksa TLS).
 - `make db-reset` sekarang menghapus **tiga** volume (`lb-db-data`, `lb-db-replica-1-data`, `lb-db-replica-2-data`).
 - `make test` hanya menguji jalur HTTP; failover database diuji terpisah oleh `make test-db` karena ia benar-benar mematikan primary.
 - `db/init/001-schema.sql` hanya dijalankan saat volume `lb-db-data` kosong. Perubahan skema pada volume lama butuh `make db-reset`, yang **menghapus data**.
@@ -704,4 +712,4 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | Alert `Backend gagal mengakses database` terus NoData | Query alert harus selalu punya nilai. Rule ini memakai `or vector(0)`; kalau menambah rule baru, pakai pola sama atau set `noDataState: OK`. |
 | Alert firing tetapi tidak ada email/Telegram | Memang belum ada contact point: Grafana → Alerting → Contact points, lalu arahkan notification policy grup `database`. |
 | `db-grant-users` gagal `Access denied for user 'root'` | `MARIADB_ROOT_PASSWORD` di `.env` beda dengan password volume lama. Pakai password yang benar; `db-reset` hanya pilihan terakhir karena menghapus data. |
-| `npm install` tidak perlu untuk menjalankan stack | Image backend sudah `npm ci`; `npm install` lokal hanya untuk menjalankan backend/unit test tanpa Docker. |
+| `bun install` tidak perlu untuk menjalankan stack | Image backend sudah `bun install --production`; `bun install` lokal hanya untuk `bunx tsc --noEmit` dan `make test-backend` tanpa Docker. |

@@ -10,8 +10,8 @@
 # - `readwritesplit`: ia mengirim sebagian SELECT ke replika. Dengan replikasi
 #   asinkron itu berarti "POST lalu GET" bisa membaca data lama atau 404.
 # - `auto_rejoin`: primary lama yang kembali bisa membawa transaksi yang tidak
-#   pernah sampai ke replika. Pemulihannya manual (`make db-rejoin 
-Queue limit reached #   DB_NODE=mariadb-primary`) supaya data bercabang tidak masuk diam-diam.
+#   pernah sampai ke replika. Pemulihannya manual (`make db-rejoin DB_NODE=mariadb-primary`)
+#   supaya data bercabang tidak masuk diam-diam.
 #
 # Password `lb_monitor` dan `lb_app` ditulis di sini karena MaxScale tidak
 # membaca env. Nilainya sama dengan default `MARIADB_MONITOR_PASSWORD` dan
