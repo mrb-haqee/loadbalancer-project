@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "drizzle-orm-patterns": {
+      "source": "giuseppe-trisciuoglio/developer-kit",
+      "sourceType": "github",
+      "skillPath": "plugins/developer-kit-typescript/skills/drizzle-orm-patterns/SKILL.md",
+      "computedHash": "6c84a25a50ebc3860cd348089e3b163c4e0fc08d9c3932976b81917d5163c6a5"
+    },
+    "elysiajs": {
+      "source": "elysiajs/skills",
+      "sourceType": "github",
+      "skillPath": "elysia/SKILL.md",
+      "computedHash": "96f649408f6ad33721968a123e28c935dec8d3356e6de36b4906bc76c9c904fc"
+    }
+  }
+}
