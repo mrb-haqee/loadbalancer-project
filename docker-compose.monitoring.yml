@@ -10,6 +10,17 @@ name: lb-k6
 # - Prometheus → trafik nyata (Traefik + 5 backend + MariaDB) DAN hasil test k6
 # - Loki       → log error Traefik + MariaDB + backend
 
+# Tiga exporter berbagi image, password, dan network. Anchor dipakai supaya
+# satu-satunya perbedaan antar service benar-benar hanya alamat node-nya.
+x-mysqld-exporter: &mysqld-exporter
+  image: prom/mysqld-exporter:v0.17.2
+  environment:
+    MYSQLD_EXPORTER_PASSWORD: ${MARIADB_EXPORTER_PASSWORD:-lb_exporter_password}
+  networks:
+    - lb-k6-net
+    - lb-net
+  restart: unless-stopped
+
 services:
   # Prometheus menyimpan trafik nyata sekaligus menerima remote-write dari k6.
   # Sengaja tidak dipublikasikan ke host dan tidak dirutekan lewat Traefik:
@@ -34,21 +45,30 @@ services:
       - lb-net
     restart: unless-stopped
 
-  # Jembatan ke MariaDB untuk metrik server.
+  # Jembatan ke MariaDB untuk metrik server — satu per node.
+  # Dipisah karena satu exporter hanya menembak satu alamat; digabung, alert
+  # tidak bisa tahu node mana yang mati. `node` juga dipakai sebagai label
+  # target di prometheus.yml supaya nama tetap terbaca di dashboard.
   # Catatan penting: saat MariaDB mati, exporter tetap hidup membalas HTTP 200
   # dengan `mysql_up 0` (`up{job="mariadb"}` tetap 1). Dashboard dan alert
   # karena itu wajib memeriksa `mysql_up`, bukan hanya `up`.
-  mysqld-exporter:
-    image: prom/mysqld-exporter:v0.17.2
+  mysqld-exporter-primary:
+    <<: *mysqld-exporter
     command:
-      - "--mysqld.address=mariadb:3306"
+      - "--mysqld.address=mariadb-primary:3306"
       - "--mysqld.username=lb_exporter"
-    environment:
-      MYSQLD_EXPORTER_PASSWORD: ${MARIADB_EXPORTER_PASSWORD:-lb_exporter_password}
-    networks:
-      - lb-k6-net
-      - lb-net
-    restart: unless-stopped
+
+  mysqld-exporter-replica-1:
+    <<: *mysqld-exporter
+    command:
+      - "--mysqld.address=mariadb-replica-1:3306"
+      - "--mysqld.username=lb_exporter"
+
+  mysqld-exporter-replica-2:
+    <<: *mysqld-exporter
+    command:
+      - "--mysqld.address=mariadb-replica-2:3306"
+      - "--mysqld.username=lb_exporter"
 
   # Loki: penyimpanan log container. Tanpa auth dan tanpa port host; hanya
   # Grafana (datasource uid `loki`) yang membacanya. Retensi 7 hari.

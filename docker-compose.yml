@@ -66,11 +66,14 @@ x-direct-5: &direct-5
 
 # Koneksi MariaDB untuk endpoint CRUD katalog server (/ui dan /api/servers).
 # Database hidup di project compose terpisah (lb-db, docker-compose.db.yml).
-# Kalau DB belum jalan, backend tetap sehat dan endpoint demo tetap bekerja;
-# hanya CRUD yang membalas 503.
+# `maxscale` adalah satu-satunya pintu masuk database: ia meneruskan penulisan
+# ke node yang sedang menjadi primary dan memindahkannya otomatis saat primary
+# mati. Backend tidak pernah menyebut node MariaDB secara langsung.
+# Kalau seluruh cluster DB mati, backend tetap sehat dan endpoint demo tetap
+# bekerja; hanya CRUD yang membalas 503.
 x-db-env: &db-env
-  DB_HOST: mariadb
-  DB_PORT: "3306"
+  DB_HOST: maxscale
+  DB_PORT: "4006"
   DB_NAME: ${MARIADB_DATABASE:-lb_demo}
   DB_USER: ${MARIADB_USER:-lb_app}
   DB_PASSWORD: ${MARIADB_PASSWORD:-lb_app_password}

@@ -38,11 +38,23 @@ scrape_configs:
       - source_labels: [__meta_docker_container_label_com_docker_compose_service]
         target_label: server
 
-  # Metrik MariaDB lewat mysqld-exporter (project lb-k6, service tetap).
+  # Metrik MariaDB lewat tiga mysqld-exporter (project lb-k6).
+  # Satu exporter per node: exporter hanya bisa menembak satu alamat, dan tanpa
+  # pemisahan ini `mysql_up` tidak bisa membedakan node mana yang mati.
+  # Label `node` = nama service compose, bukan IP.
   # `up{job="mariadb"}` hanya menguji apakah exporter bisa di-scrape; status
   # koneksi ke MariaDB sendiri ada di `mysql_up` (0 saat DB mati/login gagal).
   - job_name: mariadb
     static_configs:
-      - targets: ["mysqld-exporter:9104"]
+      - targets: ["mysqld-exporter-primary:9104"]
         labels:
           component: database
+          node: mariadb-primary
+      - targets: ["mysqld-exporter-replica-1:9104"]
+        labels:
+          component: database
+          node: mariadb-replica-1
+      - targets: ["mysqld-exporter-replica-2:9104"]
+        labels:
+          component: database
+          node: mariadb-replica-2

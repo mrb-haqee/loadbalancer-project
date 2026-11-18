@@ -3,6 +3,13 @@ apiVersion: 1
 # Alert rule Grafana untuk Load Balancer dan Database.
 # Belum ada contact point keluar; status firing terlihat langsung di Grafana.
 
+# Rule lama yang sudah tidak ada di `groups` tidak dihapus otomatis oleh Grafana.
+# Daftar ini menghapusnya sekali jalan, jadi instalasi yang masih menyimpan rule
+# versi topologi lama (satu MariaDB) ikut bersih setelah Grafana restart.
+deleteRules:
+  - orgId: 1
+    uid: mariadb-down
+
 groups:
   - orgId: 1
     name: load-balancer
@@ -172,8 +179,8 @@ groups:
     folder: Database
     interval: 1m
     rules:
-      - uid: mariadb-down
-        title: MariaDB tidak terjangkau
+      - uid: db-no-primary
+        title: Tidak ada node database yang bisa ditulis
         condition: C
         data:
           - refId: A
@@ -183,7 +190,7 @@ groups:
             datasourceUid: prometheus
             model:
               editorMode: code
-              expr: (min(mysql_up{job="mariadb"}) * min(up{job="mariadb"})) or vector(0)
+              expr: count(mysql_global_variables_read_only{job="mariadb"} == 0) or vector(0)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -216,13 +223,228 @@ groups:
         execErrState: Alerting
         for: 30s
         annotations:
-          summary: MariaDB mati atau gagal diakses exporter
+          summary: Tidak ada satu pun node MariaDB dengan read_only=OFF
           description: >
-            Status gabungan `mysql_up` dan `up{job="mariadb"}` bernilai 0 selama 30 detik.
-            Cek `make db-ps`, `docker logs lb-db-mariadb-1`, dan kredensial
-            user `lb_exporter` (`make db-grant-exporter`).
+            MaxScale tidak punya master untuk dilayani di port 4006, sehingga
+            semua tulis dan baca aplikasi gagal. Cek `make db-status` dan log
+            MaxScale (`make db-logs`). Kalau failover juga gagal, promosikan
+            manual lewat `maxctrl` lalu `make db-rejoin` node yang tertinggal.
         labels:
           severity: critical
+          component: database
+        isPaused: false
+
+      - uid: db-multiple-writable
+        title: Lebih dari satu node database bisa ditulis
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: count(mysql_global_variables_read_only{job="mariadb"} == 0) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Dua node atau lebih menerima penulisan (risiko split brain)
+          description: >
+            MaxScale seharusnya memaksa `read_only=ON` pada semua node non-master.
+            Kalau ini menyala lebih dari semenit, MaxScale mungkin mati atau
+            node bekas primary baru dinyalakan tanpa `make db-rejoin`.
+        labels:
+          severity: critical
+          component: database
+        isPaused: false
+
+      - uid: db-node-down
+        title: Satu node database tidak terjangkau
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: min by (node) (mysql_up{job="mariadb"}) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Exporter node {{ $labels.node }} tidak bisa login ke MariaDB
+          description: >
+            `mysql_up{node="{{ $labels.node }}"}` bernilai 0 selama semenit.
+            Node ini bisa mati, atau kredensial `lb_exporter` hilang setelah
+            volume dibuat ulang (`make db-grant-users`).
+        labels:
+          severity: warning
+          component: database
+        isPaused: false
+
+      - uid: db-replica-stopped
+        title: Replikasi database berhenti
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: min by (node) (mysql_slave_status_slave_sql_running{job="mariadb"}) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Replika {{ $labels.node }} berhenti menerapkan event
+          description: >
+            `Slave_SQL_Running=No` pada node ini. Replika seperti ini tidak boleh
+            dipromosikan. Perbaiki dengan `make db-rejoin DB_NODE={{ $labels.node }}`.
+        labels:
+          severity: warning
+          component: database
+        isPaused: false
+
+      - uid: db-replica-lag
+        title: Replika database tertinggal
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: max by (node) (mysql_slave_status_seconds_behind_master{job="mariadb"}) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [10]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Replika {{ $labels.node }} tertinggal lebih dari 10 detik
+          description: >
+            Lag REPLIKASI ASINKRON, jadi angka ini adalah batas atas data yang
+            hilang bila primary mati sekarang (RPO). Lihat `make db-status`.
+        labels:
+          severity: warning
           component: database
         isPaused: false
 
@@ -237,7 +459,7 @@ groups:
             datasourceUid: prometheus
             model:
               editorMode: code
-              expr: mysql_global_status_threads_connected / mysql_global_variables_max_connections
+              expr: max by (node) (mysql_global_status_threads_connected / mysql_global_variables_max_connections)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200

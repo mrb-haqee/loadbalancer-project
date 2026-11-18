@@ -1,0 +1,88 @@
+# MaxScale: satu-satunya pintu masuk database untuk backend dan Adminer.
+#
+# Tugasnya dua:
+# 1. Meneruskan setiap koneksi ke node yang sedang menjadi primary
+#    (`readconnroute` + `router_options=master`). Replika tidak melayani klien.
+# 2. Memantau ketiga node dan mempromosikan replika bila primary mati
+#    (`mariadbmon` + `auto_failover`).
+#
+# Yang sengaja TIDAK dipakai:
+# - `readwritesplit`: ia mengirim sebagian SELECT ke replika. Dengan replikasi
+#   asinkron itu berarti "POST lalu GET" bisa membaca data lama atau 404.
+# - `auto_rejoin`: primary lama yang kembali bisa membawa transaksi yang tidak
+#   pernah sampai ke replika. Pemulihannya manual (`make db-rejoin
+#   NODE=mariadb-primary`) supaya data bercabang tidak masuk diam-diam.
+#
+# Password `lb_monitor` ditulis di sini karena MaxScale tidak membaca env.
+# Nilainya sama dengan default `MARIADB_MONITOR_PASSWORD`; kalau diganti di
+# `.env`, ganti juga baris di bawah (dan jalankan `make db-grant-users`).
+
+[maxscale]
+threads=auto
+log_info=true
+log_warning=true
+log_notice=true
+
+# --- node -------------------------------------------------------------------
+# Alamat memakai nama service compose di network `lb-net`.
+
+[mariadb-primary]
+type=server
+address=mariadb-primary
+port=3306
+protocol=MariaDBBackend
+
+[mariadb-replica-1]
+type=server
+address=mariadb-replica-1
+port=3306
+protocol=MariaDBBackend
+
+[mariadb-replica-2]
+type=server
+address=mariadb-replica-2
+port=3306
+protocol=MariaDBBackend
+
+# --- pemantauan & failover --------------------------------------------------
+
+[mariadb-monitor]
+type=monitor
+module=mariadbmon
+servers=mariadb-primary,mariadb-replica-1,mariadb-replica-2
+user=lb_monitor
+password=lb_monitor_password
+# 1 detik: cukup cepat untuk demo, cukup lambat untuk tidak membanjiri log.
+monitor_interval=1000ms
+# Promosi otomatis ke replika dengan GTID paling maju.
+auto_failover=true
+# Pemulihan node yang kembali tetap manual.
+auto_rejoin=false
+# Jangan percaya satu kali gagal koneksi saja.
+verify_master_failure=true
+master_failure_timeout=3000ms
+failcount=1
+# Node yang bukan primary dipaksa read_only, termasuk primary lama yang kembali.
+enforce_read_only_slaves=true
+# Gagal cepat saat node di belakang MaxScale tidak menjawab.
+backend_connect_timeout=2s
+
+# --- pintu masuk aplikasi ---------------------------------------------------
+
+[db-service]
+type=service
+router=readconnroute
+router_options=master
+servers=mariadb-primary,mariadb-replica-1,mariadb-replica-2
+# MaxScale 24.02 mewajibkan user/password di setiap service. Dipakai untuk
+# koneksi ke backend; user ini ada di ketiga node (dibuat `make db-grant-users`),
+# jadi promosi tidak memutus login aplikasi.
+user=lb_app
+password=lb_app_password
+
+[db-listener]
+type=listener
+service=db-service
+protocol=MariaDBClient
+port=4006
+address=0.0.0.0

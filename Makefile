@@ -25,6 +25,8 @@ MODE   ?= full
 BASE_URL ?=
 KEEP   ?=
 REPORT ?=
+# Node yang di-rejoin. Default: bekas primary, kasus yang paling sering.
+DB_NODE ?= mariadb-primary
 
 MAKEFLAGS += --no-print-directory
 
@@ -35,12 +37,12 @@ MAKEFLAGS += --no-print-directory
 
 .PHONY: help \
 	net-up \
-	db-up db-down db-reset db-ps db-logs db-grant-exporter \
+	db-up db-down db-reset db-ps db-logs db-status db-rejoin db-grant-users \
 	traefik-up traefik-down traefik-logs \
 	docker-up docker-down docker-ps docker-logs \
 	k6-up k6-run k6-watch k6-down k6-logs \
 	stack stack-up stack-down clean \
-	test test-backend test-docker crud-load \
+	test test-backend test-docker test-db crud-load \
 	k6-install k6 k6-load k6-failover
 
 help:
@@ -52,13 +54,15 @@ help:
 	@echo     make clean             stack-down + hapus image lokal lb-demo - volume tetap
 	@echo   Network:
 	@echo     make net-up            Buat network bersama lb-net - idempotent
-	@echo   Database:
-	@echo     make db-up             MariaDB + Adminer, lalu segarkan user lb_exporter
-	@echo     make db-down           Matikan MariaDB + Adminer - data di volume tetap
-	@echo     make db-reset          Hapus volume DB, buat ulang skema + seed, grant ulang
+	@echo   Database (1 primary + 2 replika + MaxScale):
+	@echo     make db-up             Nyalakan cluster, grant user, clone replika, lalu MaxScale
+	@echo     make db-down           Matikan cluster - data di volume tetap
+	@echo     make db-reset          Hapus 3 volume DB, buat ulang skema + seed, clone ulang
+	@echo     make db-status         Siapa primary, status replika, lag, dan jalur MaxScale
+	@echo     make db-rejoin         Kembalikan node ke cluster: DB_NODE=mariadb-primary
 	@echo     make db-ps             Status + health container database
-	@echo     make db-logs           Log MariaDB + Adminer
-	@echo     make db-grant-exporter Buat/segarkan user monitoring lb_exporter
+	@echo     make db-logs           Log MariaDB, MaxScale, Adminer
+	@echo     make db-grant-users    Buat/segarkan user lb_app, lb_repl, lb_monitor, lb_exporter
 	@echo   Traefik:
 	@echo     make traefik-up        Traefik saja - project lb-traefik
 	@echo     make traefik-down      Matikan Traefik
@@ -78,6 +82,7 @@ help:
 	@echo     make test              Test Docker end-to-end - butuh Docker
 	@echo     make test-backend      Unit test validasi CRUD + metrik DB - tanpa Docker
 	@echo     make test-docker       Sama dengan make test
+	@echo     make test-db           Uji failover database sungguhan - mematikan primary
 	@echo     make crud-load         Uji CRUD acak: COUNT=100 USERS=10 MODE=full
 	@echo   k6 lokal:
 	@echo     make k6-install        Unduh binary k6 resmi ke tools/k6/ - butuh Bun
@@ -91,15 +96,40 @@ net-up:
 	$(NODE) scripts/network.js
 
 # --- database --------------------------------------------------------------
+#
+# Urutannya penting dan sengaja tidak diserahkan ke `depends_on`:
+# 1. tiga node MariaDB naik,
+# 2. user dibuat di SEMUA node (grant tidak direplikasi),
+# 3. replika di-clone dari node yang sedang bisa ditulis,
+# 4. MaxScale baru dinyalakan setelah ada replika yang sehat — kalau tidak,
+#    ia sempat melihat replika yang belum punya data.
+# Semua langkah idempotent, jadi `make db-up` aman diulang.
 
 db-up:
-	$(COMPOSE_DB) up -d && $(NODE) scripts/db-grant-exporter.js
+	$(COMPOSE_DB) up -d mariadb-primary mariadb-replica-1 mariadb-replica-2
+	$(NODE) scripts/db-grant-users.js
+	$(NODE) scripts/db-replica-clone.js
+	$(COMPOSE_DB) up -d maxscale adminer
 
 db-down:
 	$(COMPOSE_DB) down
 
 db-reset:
-	$(COMPOSE_DB) down -v && $(COMPOSE_DB) up -d && $(NODE) scripts/db-grant-exporter.js
+	$(COMPOSE_DB) down -v
+	$(COMPOSE_DB) up -d mariadb-primary mariadb-replica-1 mariadb-replica-2
+	$(NODE) scripts/db-grant-users.js
+	$(NODE) scripts/db-replica-clone.js
+	$(COMPOSE_DB) up -d maxscale adminer
+
+db-status:
+	$(NODE) scripts/db-cluster-status.js
+
+# Primary lama tidak pernah masuk kembali otomatis (`auto_rejoin=false`).
+# Perintah ini membuang datanya yang mungkin bercabang lalu meng-clone ulang
+# dari primary yang sah, jadi aman dipakai juga untuk replika yang rusak.
+db-rejoin:
+	$(NODE) scripts/db-grant-users.js
+	$(NODE) scripts/db-replica-clone.js --force $(DB_NODE)
 
 db-ps:
 	$(COMPOSE_DB) ps
@@ -107,8 +137,8 @@ db-ps:
 db-logs:
 	$(COMPOSE_DB) logs --tail=80
 
-db-grant-exporter:
-	$(NODE) scripts/db-grant-exporter.js
+db-grant-users:
+	$(NODE) scripts/db-grant-users.js
 
 # --- traefik ---------------------------------------------------------------
 
@@ -138,7 +168,7 @@ docker-logs:
 # --- monitoring ------------------------------------------------------------
 
 k6-up:
-	$(COMPOSE_K6) up -d --build grafana prometheus k6-runner mysqld-exporter loki alloy
+	$(COMPOSE_K6) up -d --build grafana prometheus k6-runner mysqld-exporter-primary mysqld-exporter-replica-1 mysqld-exporter-replica-2 loki alloy
 
 k6-run:
 	$(COMPOSE_K6) run --rm k6
@@ -173,6 +203,9 @@ test-docker: test
 
 test-backend:
 	$(NODE) --test --test-reporter=spec "test/backend/*.test.js"
+
+test-db:
+	$(NODE) --test --test-reporter=spec test/docker/db-failover.test.js
 
 # Uji CRUD acak lewat load balancer (butuh stack hidup). Data dibersihkan lagi
 # di akhir kecuali KEEP=1. Mode: full (POST/GET/PUT/GET/DELETE/GET 404) atau

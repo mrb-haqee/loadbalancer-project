@@ -1,20 +1,56 @@
 name: lb-db
 
 # Stack database TERPISAH dari load balancer (lb-demo) dan monitoring (lb-k6).
-# - MariaDB tidak dipublikasikan ke host dan tidak dirutekan Traefik: hanya
-#   bisa dijangkau dari `lb-net`.
-# - Adminer (pembaca isi database) punya dua pintu:
+#
+# Topologi: 1 primary + 2 replika asinkron, semuanya MariaDB 11.4.
+# - Penulisan hanya ke primary. Replika `read_only=ON`; aplikasi memakai user
+#   `lb_app` yang tidak punya SUPER, jadi tidak bisa menulis ke replika.
+# - `maxscale` adalah SATU-SATUNYA pintu masuk aplikasi (port 4006). Ia
+#   meneruskan koneksi ke node yang sedang menjadi primary dan memindahkannya
+#   otomatis saat primary mati (MariaDB Monitor, `auto_failover`).
+# - Nama `mariadb-primary` hanya menandai peran AWAL. Setelah failover, primary
+#   bisa `mariadb-replica-1` atau `mariadb-replica-2`; karena itu skrip dan
+#   dashboard mencari primary dari `@@read_only`, bukan dari nama.
+# - Replika tidak melayani klien. Semua baca dan tulis lewat MaxScale ke primary,
+#   sehingga "tulis lalu baca" tidak pernah membaca data basi.
+# - Pemulihan (primary lama kembali) SENGAJA manual: `make db-rejoin
+#   NODE=mariadb-primary`. `auto_rejoin` dimatikan supaya node yang datanya
+#   bercabang tidak diam-diam masuk lagi ke cluster.
+#
+# MariaDB dan MaxScale tidak dipublikasikan ke host dan tidak dirutekan Traefik:
+# hanya bisa dijangkau dari `lb-net`. Adminer punya dua pintu:
 #     http://adminer.localhost     -> lewat Traefik (jalur utama)
 #     http://127.0.0.1:8081        -> cadangan loopback
-#   Label Traefik di bawah hanya menambah rute bila Traefik hidup; tanpa
-#   Traefik, port 8081 tetap jalan sehingga stack DB bisa berdiri sendiri.
-# - Nama service `mariadb` adalah alamat yang dipakai backend (DB_HOST=mariadb).
 #
 # Nilai di bawah adalah kredensial DEMO. Ganti lewat `.env` (lihat .env.example).
 
+# Opsi yang sama untuk ketiga node. `server-id` dan `read-only` sengaja ditulis
+# per service karena identitas node tidak boleh diwarisi diam-diam.
+x-mariadb-common: &mariadb-common
+  image: mariadb:11.4
+  labels:
+    # Satu-satunya alasan label ini ada: Alloy (stack lb-k6) hanya mengambil
+    # log container berlabel `lb.logs=true`, supaya Loki tidak penuh log asing.
+    lb.logs: "true"
+  healthcheck:
+    test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+    start_period: 10s
+  networks:
+    - lb-net
+  restart: unless-stopped
+
 services:
-  mariadb:
-    image: mariadb:11.4
+  # ---------------------------------------------------------------------------
+  # Primary: satu-satunya node yang menerima penulisan.
+  # Volume `lb-db-data` sengaja memakai nama lama, jadi data katalog yang sudah
+  # ada otomatis menjadi isi primary — tidak perlu db-reset saat pindah ke
+  # topologi ini.
+  # ---------------------------------------------------------------------------
+  mariadb-primary:
+    <<: *mariadb-common
     environment:
       MARIADB_DATABASE: ${MARIADB_DATABASE:-lb_demo}
       MARIADB_USER: ${MARIADB_USER:-lb_app}
@@ -23,30 +59,104 @@ services:
     command:
       - "--character-set-server=utf8mb4"
       - "--collation-server=utf8mb4_unicode_ci"
+      - "--server-id=1"
+      - "--log-bin=mariadb-bin"
+      - "--binlog-format=ROW"
+      # GTID dipakai supaya promosi replika tidak bergantung pada nama file
+      # binlog: replika hanya perlu `gtid_slave_pos` yang benar.
+      - "--gtid-strict-mode=ON"
+      - "--log-slave-updates=ON"
     volumes:
       - lb-db-data:/var/lib/mysql
-      # Skema + seed hanya dibaca saat volume masih kosong.
+      # Skema + seed hanya dibaca saat volume masih kosong. Replika TIDAK
+      # memakai folder ini; isinya datang dari clone primary.
       - ./db/init:/docker-entrypoint-initdb.d:ro
+
+  # ---------------------------------------------------------------------------
+  # Replika: `read_only=ON` sejak start. Tidak punya init SQL dan tidak punya
+  # database sampai `scripts/db-replica-clone.js` selesai.
+  # `--relay-log` diberi nama tetap supaya container bisa dibuat ulang tanpa
+  # meninggalkan relay log yatim (nama default mengikuti hostname container,
+  # yang berubah setiap recreate).
+  # ---------------------------------------------------------------------------
+  mariadb-replica-1:
+    <<: *mariadb-common
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-lb_root_password}
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--server-id=2"
+      - "--log-bin=mariadb-bin"
+      - "--binlog-format=ROW"
+      - "--gtid-strict-mode=ON"
+      - "--read-only=ON"
+      - "--relay-log=relay-bin"
+      # Wajib untuk failover 3 node: node yang dipromosikan harus menulis event
+      # yang ia terima ke binlog-nya sendiri, supaya replika lain bisa
+      # melanjutkan replikasi dari sana. Tanpa ini MaxScale memperingatkan
+      # "replication will break for lagging replicas".
+      - "--log-slave-updates=ON"
+    volumes:
+      - lb-db-replica-1-data:/var/lib/mysql
+
+  mariadb-replica-2:
+    <<: *mariadb-common
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-lb_root_password}
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--server-id=3"
+      - "--log-bin=mariadb-bin"
+      - "--binlog-format=ROW"
+      - "--gtid-strict-mode=ON"
+      - "--read-only=ON"
+      - "--relay-log=relay-bin"
+      - "--log-slave-updates=ON"
+    volumes:
+      - lb-db-replica-2-data:/var/lib/mysql
+
+  # ---------------------------------------------------------------------------
+  # MaxScale: pintu masuk tunggal + koordinator failover.
+  # `readconnroute router_options=master` = semua koneksi (baca maupun tulis)
+  # hanya ke node yang sedang menjadi primary. Replika tidak pernah dilayani,
+  # sesuai keputusan "baca tidak boleh melihat data basi".
+  # Konfigurasi statis di docker/maxscale/maxscale.cnf; tidak ada port host.
+  # ---------------------------------------------------------------------------
+  maxscale:
+    image: mariadb/maxscale:24.02.9
+    labels:
+      # Keputusan failover hanya terlihat di log MaxScale; tanpa label ini Loki
+      # tidak mengangkutnya dan `make db-logs` jadi satu-satunya sumber.
+      lb.logs: "true"
+    # Default image menjalankan MaxScale di latar belakang lewat `maxscale-start`
+    # + monit, sehingga `docker compose logs` hanya berisi pesan monit. Perintah
+    # ini menjalankannya di depan dengan log ke stdout supaya log asli MaxScale
+    # (termasuk keputusan failover) masuk ke `make db-logs` dan Loki.
+    command:
+      - "maxscale"
+      - "-U"
+      - "maxscale"
+      - "--nodaemon"
+      - "--log=stdout"
+      - "--config=/etc/maxscale.cnf"
+    volumes:
+      - ./docker/maxscale/maxscale.cnf:/etc/maxscale.cnf:ro
     networks:
       - lb-net
-    # Satu-satunya alasan label ini ada: Alloy (stack lb-k6) hanya mengambil
-    # log container berlabel `lb.logs=true`, supaya Loki tidak penuh log asing.
-    labels:
-      lb.logs: "true"
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 10s
+    depends_on:
+      mariadb-primary:
+        condition: service_healthy
     restart: unless-stopped
 
-  # Adminer: satu halaman untuk membaca/menyunting isi MariaDB.
-  # Login: server `mariadb`, user `lb_app`, password dari .env.
+  # Adminer: satu halaman untuk membaca/menyunting isi cluster.
+  # Login: server `maxscale`, user `lb_app`, password dari .env. Lewat MaxScale
+  # supaya tetap bisa menulis setelah primary berganti.
   adminer:
     image: adminer:4
     environment:
-      ADMINER_DEFAULT_SERVER: mariadb
+      ADMINER_DEFAULT_SERVER: maxscale
     # Prioritas 200 > router "demo" (1) yang menangkap semua host sebagai
     # fallback. Tanpa ini, adminer.localhost ikut dilempar ke backend.
     labels:
@@ -62,13 +172,20 @@ services:
     networks:
       - lb-net
     depends_on:
-      mariadb:
+      maxscale:
+        condition: service_started
+      mariadb-primary:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
+  # Nama lama dipertahankan: data katalog yang sudah ada menjadi isi primary.
   lb-db-data:
     name: lb-db-data
+  lb-db-replica-1-data:
+    name: lb-db-replica-1-data
+  lb-db-replica-2-data:
+    name: lb-db-replica-2-data
 
 networks:
   lb-net:

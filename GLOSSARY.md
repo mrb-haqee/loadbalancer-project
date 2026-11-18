@@ -73,4 +73,41 @@ Layanan terisolasi yang menerima Trigger dan mengeksekusi paling banyak satu Run
 Tampilan pemantauan yang menyajikan trafik nyata Load Balancer dan Backend secara berkelanjutan, terpisah dari metrik hasil Run pengujian beban.
 
 **Exporter Database**:
-Jembatan pemantauan yang membaca status internal database dan menyajikannya sebagai target pengambilan metrik tanpa membuka akses database ke jaringan luar.
+Jembatan pemantauan yang membaca status internal database dan menyajikannya sebagai target pengambilan metrik tanpa membuka akses database ke jaringan luar. Di cluster, satu Exporter Database dipasang per node supaya kegagalan dapat diatribusikan ke node tertentu.
+_Avoid_: Agent database, sidecar
+
+## Cluster Database
+
+**Primary**:
+Node database yang menerima penulisan. Peran ini melekat pada node, bukan pada nama container: setelah failover, Primary bisa bernama `mariadb-replica-1`.
+_Avoid_: Master, server utama
+
+**Replika**:
+Node database yang menyalin event dari Primary secara Asinkron dan menolak penulisan dari user aplikasi. Replika tidak melayani pembacaan klien.
+_Avoid_: Slave, secondary, read replica (karena tidak melayani baca)
+
+**Replikasi Asinkron**:
+Penyalinan event dari Primary ke Replika yang tidak menunggu konfirmasi Replika sebelum transaksi dianggap selesai. Konsekuensinya RPO selalu lebih besar dari nol.
+_Avoid_: Sinkronisasi, mirroring
+
+**GTID**:
+Identitas global untuk setiap transaksi (`domain-server-seq`) sehingga Replika dapat melanjutkan dari posisi yang benar tanpa bergantung pada nama file binlog.
+
+**Lag**:
+Selisih waktu antara event terakhir di Primary dan event terakhir yang sudah diterapkan Replika (`Seconds_Behind_Master`). Lag adalah batas atas data yang hilang bila Primary mati saat itu juga.
+_Avoid_: Delay, keterlambatan
+
+**RPO (Recovery Point Objective)**:
+Jumlah penulisan yang sudah dijawab sukses ke aplikasi tetapi hilang saat failover. Diukur, bukan diasumsikan.
+
+**Failover Database**:
+Pemindahan peran Primary ke salah satu Replika secara otomatis ketika Primary tidak lagi menjawab, dilakukan oleh monitor MaxScale. Koneksi aplikasi ikut dialihkan karena aplikasi hanya mengenal satu alamat `maxscale:4006`.
+_Avoid_: Switchover (itu perpindahan yang direncanakan)
+
+**Rejoin**:
+Pengembalian node yang sebelumnya mati ke cluster secara manual: datanya dibuang, lalu di-clone ulang dari Primary yang sah. Sengaja tidak otomatis supaya dua riwayat yang bercabang tidak digabung diam-diam.
+_Avoid_: Recovery, repair
+
+**Split Brain**:
+Keadaan ketika lebih dari satu node menerima penulisan. Di topologi ini dicegah dengan memaksa `read_only=ON` pada semua node non-Primary, dan diperingatkan lewat alert `db-multiple-writable`.
+_Avoid_: Dual master

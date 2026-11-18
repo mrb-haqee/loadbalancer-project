@@ -13,13 +13,15 @@ dari label container di `docker-compose.yml`. Alasannya ada di
 
 | Komponen | Project compose | Alamat |
 |---|---|---|
-| MariaDB 11.4 | `lb-db` | `mariadb:3306`, hanya di network `lb-net` |
+| MaxScale 24.02 | `lb-db` | `maxscale:4006`, hanya di network `lb-net` |
+| MariaDB 11.4 primary | `lb-db` | `mariadb-primary:3306`, hanya di `lb-net` |
+| MariaDB 11.4 replika | `lb-db` | `mariadb-replica-1:3306`, `mariadb-replica-2:3306` (`read_only=ON`) |
 | Adminer (pembaca database) | `lb-db` | `http://adminer.localhost` (lewat Traefik) · cadangan `http://127.0.0.1:8081` |
 | UI CRUD | `lb-demo` (dilayani semua backend) | `http://server.localhost/ui` |
 | API CRUD | `lb-demo` (dilayani semua backend) | `http://server.localhost/api/servers` |
 | Monitoring database | `lb-k6` | `http://grafana.localhost/d/db-monitoring` (metrik, alert, log) |
 
-MariaDB sengaja **tidak** dipublikasikan ke host dan **tidak** dirutekan lewat Traefik.
+MariaDB dan MaxScale sengaja **tidak** dipublikasikan ke host dan **tidak** dirutekan lewat Traefik. Aplikasi hanya mengenal `maxscale:4006`; node mana yang melayani ditentukan monitor, bukan konfigurasi backend.
 Adminer punya dua pintu: `http://adminer.localhost` (router `adminer`, prioritas 200 —
 pola yang sama dengan `grafana.localhost`) dan `http://127.0.0.1:8081` (loopback,
 cadangan). Stack database tetap bisa hidup walau Traefik dan backend dimatikan; label
@@ -29,7 +31,7 @@ Traefik hanya menambah rute bila Traefik hidup.
 
 ```bash
 make net-up     # sekali: network lb-net
-make db-up      # MariaDB + Adminer (project lb-db)
+make db-up      # 3 node -> grant user -> clone replika -> MaxScale + Adminer
 make docker-up  # 5 backend (project lb-demo), image memuat driver mysql2
 ```
 
@@ -42,14 +44,16 @@ make stack-down # k6-down -> docker-down -> traefik-down -> db-down
 
 | Perintah | Arti |
 |---|---|
-| `make db-up` | Nyalakan MariaDB + Adminer |
-| `make db-down` | Matikan keduanya (data di volume tetap) |
-| `make db-reset` | Hapus volume `lb-db-data`, buat ulang skema + seed |
-| `make db-logs` | Log MariaDB + Adminer |
+| `make db-up` | Nyalakan tiga node, buat user, clone replika, lalu MaxScale + Adminer |
+| `make db-down` | Matikan semuanya (data di tiga volume tetap) |
+| `make db-reset` | Hapus **tiga** volume, buat ulang skema + seed, clone ulang |
+| `make db-status` | Siapa primary, IO/SQL tiap replika, lag, dan jawaban `maxscale:4006` |
+| `make db-rejoin` | `DB_NODE=<node>` — kembalikan node ke cluster (data bercabang dibuang) |
+| `make db-grant-users` | Buat/segarkan `lb_app`, `lb_repl`, `lb_monitor`, `lb_exporter` di tiap node |
+| `make db-logs` | Log MariaDB, MaxScale, Adminer |
 | `make db-ps` | Status + health container database |
-| `make db-grant-exporter` | Buat/segarkan user monitoring `lb_exporter` (tanpa mengubah data) |
 
-Urutan penting: `lb-net` harus ada sebelum `db-up` dan `docker-up`.
+Urutan penting: `lb-net` harus ada sebelum `db-up` dan `docker-up`. Di dalam `db-up` urutannya juga tetap — MaxScale baru dinyalakan setelah replika punya data.
 
 ## Kredensial
 
@@ -61,6 +65,8 @@ Nilai di bawah adalah **kredensial demo**, bukan rahasia produksi:
 | `MARIADB_USER` | `lb_app` |
 | `MARIADB_PASSWORD` | `lb_app_password` |
 | `MARIADB_ROOT_PASSWORD` | `lb_root_password` |
+| `MARIADB_REPL_PASSWORD` | `lb_repl_password` (user replikasi antar node) |
+| `MARIADB_MONITOR_PASSWORD` | `lb_monitor_password` (user monitor MaxScale; juga ditulis di `docker/maxscale/maxscale.cnf`) |
 | `MARIADB_EXPORTER_PASSWORD` | `lb_exporter_password` (user monitoring, bukan untuk aplikasi) |
 | `ADMINER_PORT` | `8081` |
 
@@ -70,15 +76,61 @@ Ganti lewat `.env` di root project (contoh di `.env.example`). `.env` sudah masu
 Login Adminer di `http://adminer.localhost` (atau `http://127.0.0.1:8081`):
 
 - System: **MySQL / MariaDB**
-- Server: `mariadb`
+- Server: `maxscale`
 - Username: `lb_app`
 - Password: `lb_app_password` (atau nilai `.env`)
 - Database: `lb_demo`
 
+Server **`maxscale`**, bukan `mariadb-primary`: setelah failover, hanya nama itu yang masih menunjuk node yang benar.
+
+## Topologi dan failover
+
+Tiga node MariaDB 11.4: satu primary, dua replika asinkron. Semuanya di belakang
+MaxScale, yang menjadi satu-satunya alamat bagi aplikasi.
+
+- **Primary** menerima semua baca dan tulis. **Replika** `read_only=ON` dan tidak
+  melayani klien — dengan replikasi asinkron, membaca dari replika berarti `POST` lalu
+  `GET` bisa melihat data lama.
+- **Nama bukan peran.** `mariadb-primary` hanya peran awal. Setelah failover, primary
+  bisa `mariadb-replica-1`; skrip mencari primary dari `@@read_only` dan dari node yang
+  dilayani `maxscale:4006`.
+- **Failover otomatis.** Monitor MaxScale (interval 1 detik, `master_failure_timeout`
+  3 detik) menandai primary mati, mempromosikan replika dengan GTID paling maju, lalu
+  mengarahkan replika lain ke node baru.
+- **Rejoin manual.** `auto_rejoin=false`: node yang hidup lagi tidak masuk sendiri.
+  Datanya bisa bercabang, jadi pemulihannya eksplisit:
+
+  ```bash
+  make db-status                              # siapa primary sekarang
+  make db-rejoin DB_NODE=mariadb-primary      # buang data node itu, clone dari primary
+  ```
+
+  Data yang sempat ditulis ke node lama **hilang**. Itu disengaja; menggabungkan dua
+  riwayat otomatis tidak bisa dilakukan dengan benar.
+- **RPO > 0.** Tulisan yang sudah dijawab sukses tetap bisa hilang bila primary mati
+  sebelum event sampai ke replika. Ukurannya dibaca dari lag replika; `make test-db`
+  mengukurnya langsung dengan mematikan primary.
+
+Melihat keadaan sekarang:
+
+```bash
+make db-status
+# node               role     read_only  io  sql  lag   master
+# mariadb-primary    PRIMARY  OFF       -   -    -     -
+# mariadb-replica-1  replica  ON        Yes  Yes  0s    mariadb-primary
+# mariadb-replica-2  replica  ON        Yes  Yes  0s    mariadb-primary
+#
+# maxscale:4006 -> mariadb-primary (read_only=0)
+```
+
+Kalau `db-status` mengeluh "ada lebih dari satu node bisa ditulis", bekas primary sudah
+hidup tanpa di-rejoin. Jangan menulis ke dua-duanya; jalankan `make db-rejoin`.
+
 ## Skema
 
-File: `db/init/001-schema.sql`. Dijalankan otomatis oleh image MariaDB **hanya saat
-volume masih kosong**.
+File: `db/init/001-schema.sql`. Dijalankan otomatis oleh node primary **hanya saat
+volume `lb-db-data` masih kosong**. Replika tidak memakai file ini: isinya datang dari
+`mariadb-dump` + restore yang dijalankan `scripts/db-replica-clone.js`.
 
 Tabel `registered_servers`:
 
@@ -171,14 +223,16 @@ supaya test load balancing tidak berubah.
 
 Kesehatan database dipantau dari stack `lb-k6`, bukan dari `lb-db`:
 
-- `mysqld-exporter` membaca status MariaDB lewat user `lb_exporter`
-  (`PROCESS` + `REPLICATION CLIENT`) yang dibuat `make db-grant-exporter`.
+- Tiga `mysqld-exporter` (satu per node) membaca status lewat user `lb_exporter`
+  (`PROCESS` + `REPLICATION CLIENT` + `SLAVE MONITOR`) yang dibuat `make db-grant-users`.
+  Label Prometheus `node` memakai nama service, jadi alert menyebut node yang bermasalah.
 - Backend menambahkan metrik `lb_db_queries_total`, `lb_db_errors_total`, dan
   `lb_db_query_duration_seconds` ke `/metrics`.
-- Log MariaDB dan backend dikirim Alloy ke Loki (label `lb.logs=true`).
+- Log tiga node MariaDB, MaxScale, dan backend dikirim Alloy ke Loki (label `lb.logs=true`).
 
 Dashboard: `http://grafana.localhost/d/db-monitoring`. Alert yang tersedia:
-`mariadb-down`, `mariadb-connections-high`, `mariadb-slow-queries`, `api-db-errors`.
+`db-no-primary`, `db-multiple-writable`, `db-node-down`, `db-replica-stopped`,
+`db-replica-lag`, `mariadb-connections-high`, `mariadb-slow-queries`, `api-db-errors`.
 Panduan lengkap ada di [`database-monitoring.md`](database-monitoring.md).
 
 ## Verifikasi yang sudah dijalankan
@@ -192,12 +246,13 @@ curl -s http://server-3.localhost/api/servers/6                # 200, x-served-b
 curl -s -X POST ... (port 0)                                   # 400 VALIDATION_ERROR
 curl -s -X POST ... (name server-1)                            # 409 DUPLICATE_NAME
 
-# database dimatikan
-docker compose -p lb-db -f docker-compose.db.yml stop mariadb
-curl -s -o /dev/null -w '%{http_code}' http://server-1.localhost/api/servers   # 503 (1,1 detik)
-curl -s -o /dev/null -w '%{http_code}' http://server-1.localhost/health        # 200
-# sementara itu di Grafana: up{job="mariadb"} -> 0, lalu alert mariadb-down firing
-docker compose -p lb-db -f docker-compose.db.yml start mariadb && make db-grant-exporter
+# primary dimatikan: aplikasi pindah ke replika tanpa restart backend
+docker compose -p lb-db -f docker-compose.db.yml stop mariadb-primary
+make db-status                                                    # primary pindah, satu node DOWN
+curl -s -o /dev/null -w '%{http_code}' http://server-1.localhost/api/servers  # 200 setelah jendela failover
+docker compose -p lb-db -f docker-compose.db.yml start mariadb-primary
+make db-rejoin DB_NODE=mariadb-primary                            # kembali sebagai replika
+make test-db                                                      # otomatis, termasuk RPO
 
 # Adminer lewat Traefik dan lewat port cadangan
 curl -s -o /dev/null -w '%{http_code}' http://adminer.localhost/               # 200 (halaman login)
@@ -256,4 +311,8 @@ memuat semuanya.
 - Kredensial demo tersimpan sebagai default compose dan bisa dilihat di repo.
 - Katalog tidak mengubah rotasi Traefik dan tidak dibaca oleh Prometheus/k6.
 - Monitoring database hanya untuk lokal: Grafana/Loki tanpa auth tambahan, exporter memakai password demo, dan alert belum punya notifikasi keluar.
-- Satu instance MariaDB, tanpa replika/backup. `db-reset` menghapus data.
+- Failover hanya menutup kegagalan proses/container database. Ketiga node dan MaxScale ada di satu mesin Docker, jadi mesin itu tetap titik tunggal; host mati, disk penuh, dan network putus tidak termasuk.
+- Replikasi asinkron: RPO > 0. Tidak ada semi-sync maupun Galera.
+- Replika tidak menambah kapasitas baca — semua SELECT tetap ke primary.
+- `maxscale:4006` adalah satu-satunya pintu aplikasi; MaxScale sendiri tidak punya cadangan.
+- `db-reset` menghapus **tiga** volume (`lb-db-data`, `lb-db-replica-1-data`, `lb-db-replica-2-data`).
