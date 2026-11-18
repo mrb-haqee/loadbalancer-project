@@ -95,6 +95,7 @@ loadBalancer/
 ├── scripts/
 │   ├── network.js                # buat network lb-net sekali (idempotent)
 │   ├── db-grant-exporter.js      # buat/segarkan user monitoring lb_exporter
+│   ├── crud-load.js              # uji CRUD acak: COUNT entitas, USERS paralel
 │   ├── install-k6.js             # unduh binary k6 resmi lewat Bun → tools/k6/
 │   └── k6.js                     # pembungkus k6 (Windows/Linux/macOS)
 ├── k6/
@@ -230,6 +231,31 @@ make test-backend  # unit test validasi CRUD + metrik DB, tanpa Docker/DB
 Test suite ini **bukan unit test palsu**: ia memastikan network `lb-net` dan Traefik hidup (idempotent, tidak menyalakan ulang kalau sudah jalan), menyalakan 5 backend, menguji lewat HTTP seperti user sungguhan, lalu **hanya `lb-demo`** yang dimatikan di akhir. Traefik dibiarkan hidup karena mungkin sedang dipakai Grafana/k6. Kalau Docker Desktop mati, test otomatis **skip** dengan pesan jelas (bukan gagal).
 
 Test tidak bergantung pada resolusi `*.localhost` milik OS (di sebagian Windows hanya sebagian nama yang resolve): untuk host `.localhost`, helper menembak `127.0.0.1` sambil tetap mengirim header `Host` yang sama, jadi aturan router Traefik tetap diuji apa adanya.
+
+### 5a. Uji CRUD dengan data acak
+
+`make test` sengaja deterministik dan cepat. Untuk membanjiri katalog dengan data acak sekaligus memverifikasi seluruh siklus CRUD, ada alat terpisah:
+
+```bash
+make crud-load                        # 100 entitas, 10 user paralel, siklus penuh
+make crud-load COUNT=1000 USERS=50    # lebih besar dan lebih paralel
+make crud-load COUNT=500 MODE=create  # hanya POST (isi data), lalu dibersihkan
+make crud-load COUNT=200 KEEP=1       # biarkan data di katalog untuk diperiksa
+make crud-load COUNT=500 REPORT=monitoring/reports/crud.json
+```
+
+Setiap entitas menjalani `POST → GET → PUT → GET → DELETE → GET (404)` lewat `http://server.localhost`, jadi request ikut dibagi Traefik ke 5 backend. `USERS` adalah jumlah worker paralel yang berbagi **satu** antrean: `COUNT=1000 USERS=20` tetap 1000 entitas, bukan 20.000. Data dihapus lagi di akhir (termasuk saat run gagal) kecuali `KEEP=1`.
+
+| Parameter | Arti |
+|---|---|
+| `COUNT` | Jumlah entitas yang dibuat (default 100) |
+| `USERS` | Jumlah worker paralel (default 10) |
+| `MODE` | `full` (siklus CRUD, default) atau `create` (hanya POST) |
+| `BASE_URL` | Default `http://server.localhost`; cadangan `http://127.0.0.1:8088` |
+| `KEEP` | `KEEP=1` mempertahankan data; default dibersihkan |
+| `REPORT` | Path JSON untuk ringkasan lengkap |
+
+Ringkasan menampilkan jumlah request sesuai harapan, kegagalan per operasi, latensi p50/p95/max, throughput, sebaran `x-served-by`, dan sisa data. Exit code 1 bila ada entitas gagal atau pembersihan gagal. Detail dan batasannya ada di [`docs/database-crud.md`](docs/database-crud.md).
 
 ## 6. Uji beban dengan k6
 
@@ -553,6 +579,7 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | Gejala | Penyebab & solusi |
 |---|---|
 | `make` tidak dikenali (`'make' is not recognized` / `command not found`) | GNU Make belum terpasang. Windows: `choco install make` atau GnuWin32 Make; Linux: paket `make`; macOS: `xcode-select --install`. Buka terminal baru setelah instalasi, lalu coba `make help`. |
+| `make crud-load` gagal `ECONNREFUSED` / 503 | Stack atau database belum hidup. Jalankan `make stack-up` (atau minimal `make net-up db-up traefik-up docker-up`), lalu ulangi. |
 | `test` dilewati ("Docker daemon tidak berjalan") | Nyalakan Docker Desktop, tunggu status "running", ulangi. |
 | `bind: address already in use` saat `docker-up` | Port 80/8088/8089 dipakai proses lain. Bebaskan port 80, atau tetap pakai `http://127.0.0.1:8088` (sudah dipetakan juga). |
 | `http://server.localhost` balas **404** | Traefik membuang router `demo` karena ambigu. Cek `docker compose -p lb-traefik -f docker-compose.traefik.yml logs traefik \| Select-String "cannot be linked"`. Pastikan label `traefik.http.routers.demo.service: demo` ada, lalu `make docker-up`. |

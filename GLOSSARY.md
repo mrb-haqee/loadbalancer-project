@@ -70,6 +70,8 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Tag `run`** — Label berisi timestamp yang ditempel ke semua metrik satu eksekusi k6, supaya hasil beberapa run bisa dipisah dan dibandingkan di dashboard.
 
+**Uji CRUD Acak (`crud-load`)** — Uji yang membuat banyak Server Terdaftar dengan data acak lewat API, menjalankannya dengan beberapa pengguna virtual bersamaan, lalu menghapusnya kembali. Berbeda dari **Test Suite** yang deterministik dan dari uji beban k6 yang hanya menembak endpoint demo.
+
 ## Istilah pemantauan
 
 **Metrik** — Angka hasil pengukuran, mis. `http_reqs` dari k6 atau `lb_backend_requests_total` dari backend; disimpan sebagai deret waktu lalu dibaca dashboard.

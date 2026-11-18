@@ -17,6 +17,15 @@ COMPOSE_TRAEFIK := docker compose -p lb-traefik -f docker-compose.traefik.yml
 COMPOSE_DEMO    := docker compose -p lb-demo -f docker-compose.yml
 COMPOSE_K6      := docker compose -p lb-k6 -f docker-compose.monitoring.yml
 
+# Parameter uji CRUD acak; bisa dioverride dari command line, mis.
+# make crud-load COUNT=500 USERS=20 MODE=create KEEP=1
+COUNT  ?= 100
+USERS  ?= 10
+MODE   ?= full
+BASE_URL ?=
+KEEP   ?=
+REPORT ?=
+
 MAKEFLAGS += --no-print-directory
 
 # stack-up/stack-down bergantung pada urutan, bukan paralelisme.
@@ -31,7 +40,7 @@ MAKEFLAGS += --no-print-directory
 	docker-up docker-down docker-ps docker-logs \
 	k6-up k6-run k6-watch k6-down k6-logs \
 	stack stack-up stack-down clean \
-	test test-backend test-docker \
+	test test-backend test-docker crud-load \
 	k6-install k6 k6-load k6-failover
 
 help:
@@ -69,6 +78,7 @@ help:
 	@echo     make test              Test Docker end-to-end - butuh Docker
 	@echo     make test-backend      Unit test validasi CRUD + metrik DB - tanpa Docker
 	@echo     make test-docker       Sama dengan make test
+	@echo     make crud-load         Uji CRUD acak: COUNT=100 USERS=10 MODE=full
 	@echo   k6 lokal:
 	@echo     make k6-install        Unduh binary k6 resmi ke tools/k6/ - butuh Bun
 	@echo     make k6                Cek versi k6 yang terpasang
@@ -163,6 +173,12 @@ test-docker: test
 
 test-backend:
 	$(NODE) --test --test-reporter=spec "test/backend/*.test.js"
+
+# Uji CRUD acak lewat load balancer (butuh stack hidup). Data dibersihkan lagi
+# di akhir kecuali KEEP=1. Mode: full (POST/GET/PUT/GET/DELETE/GET 404) atau
+# create (POST saja).
+crud-load:
+	$(NODE) scripts/crud-load.js --count $(COUNT) --users $(USERS) --mode $(MODE) $(if $(BASE_URL),--base $(BASE_URL)) $(if $(filter-out 0,$(KEEP)),--keep) $(if $(REPORT),--report $(REPORT))
 
 # --- k6 lokal (binary, bukan container) ------------------------------------
 

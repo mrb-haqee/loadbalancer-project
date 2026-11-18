@@ -205,6 +205,50 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/                  #
 # login lb_app lewat adminer.localhost -> daftar tabel berisi registered_servers
 ```
 
+## Uji CRUD dengan data acak
+
+Test suite Docker membuktikan rotasi dan failover, bukan isi katalog. Untuk menguji CRUD
+dengan banyak data, pakai:
+
+```bash
+make crud-load                         # 100 entitas, 10 user paralel
+make crud-load COUNT=2000 USERS=50     # 2000 entitas, 50 worker
+make crud-load COUNT=500 MODE=create   # hanya POST, lalu dibersihkan
+make crud-load COUNT=200 KEEP=1        # data dipertahankan di katalog
+make crud-load COUNT=500 REPORT=monitoring/reports/crud.json
+```
+
+Aturannya:
+
+- **`COUNT` = jumlah entitas**, bukan jumlah request. Mode `full` menghasilkan 6 request
+  per entitas (POST, GET, PUT, GET, DELETE, lalu GET terakhir yang harus 404); mode
+  `create` hanya 1 request per entitas.
+- **`USERS` = worker paralel** yang berbagi satu antrean `COUNT`. `COUNT=1000 USERS=20`
+  tetap 1000 entitas.
+- Nama entitas selalu berprefix `crud-<runId>-<nomor>` sehingga tidak bentrok dengan seed
+  `server-1`…`server-5` maupun dengan run lain yang berjalan bersamaan.
+- Field lain acak tetapi tetap valid menurut `src/backend/servers/validation.js`: host
+  `10.x.y.z`, port 1–65535, bobot 1–100, `enabled` acak, catatan ≤ 255 karakter.
+  Generator sengaja tidak memakai library tambahan.
+- Setiap langkah diperiksa, bukan hanya status: `POST` harus 201 + `Location`, `GET` harus
+  mengembalikan field yang sama, `PUT` harus mengganti seluruh field, `DELETE` harus 204,
+  dan `GET` sesudahnya harus 404 `NOT_FOUND`.
+- **Data dibersihkan di akhir**, termasuk entitas yang gagal di tengah siklus. `KEEP=1`
+  melewati pembersihan. Mode `create` tanpa `KEEP` menghapus semua yang baru dibuat.
+- Base URL default `http://server.localhost` (lewat Traefik, jadi request ikut dibagi ke
+  5 backend); `BASE_URL=http://127.0.0.1:8088` dipakai bila nama `*.localhost` tidak
+  resolve.
+- Ringkasan memuat jumlah request sesuai harapan, kegagalan per operasi, p50/p95/max,
+  throughput, sebaran `x-served-by`, dan sisa data. Exit code 1 bila ada entitas gagal
+  atau pembersihan gagal; error koneksi/5xx menghentikan run lebih awal.
+- `REPORT=path.json` menyimpan ringkasan yang sama dalam JSON (konfigurasi, operasi,
+  sebaran backend, maksimal 50 kegagalan pertama).
+
+Karena `GET /api/servers` mengembalikan seluruh baris, siklus per entitas memakai
+`GET /api/servers/:id`, bukan list. Jangan menjalankan `COUNT` besar tanpa `KEEP` di
+katalog yang sedang dipakai presentasi: selama run, jumlah baris naik dan UI ikut
+memuat semuanya.
+
 ## Batasan
 
 - Tanpa autentikasi: siapa pun yang bisa membuka `/ui` bisa menulis. Hanya untuk lokal.
