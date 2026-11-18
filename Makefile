@@ -128,7 +128,12 @@ db-status:
 # Perintah ini membuang datanya yang mungkin bercabang lalu meng-clone ulang
 # dari primary yang sah, jadi aman dipakai juga untuk replika yang rusak.
 db-rejoin:
-	$(NODE) scripts/db-grant-users.js
+ifeq ($(origin NODE),command line)
+ifneq ($(origin DB_NODE),command line)
+	$(error Gunakan DB_NODE=$(NODE) - variabel NODE dipakai Makefile untuk binary Node.js)
+endif
+endif
+	$(NODE) scripts/db-grant-users.js $(DB_NODE)
 	$(NODE) scripts/db-replica-clone.js --force $(DB_NODE)
 
 db-ps:

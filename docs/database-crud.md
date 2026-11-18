@@ -63,7 +63,7 @@ Nilai di bawah adalah **kredensial demo**, bukan rahasia produksi:
 |---|---|
 | `MARIADB_DATABASE` | `lb_demo` |
 | `MARIADB_USER` | `lb_app` |
-| `MARIADB_PASSWORD` | `lb_app_password` |
+| `MARIADB_PASSWORD` | `lb_app_password` (juga ditulis di `docker/maxscale/maxscale.cnf`) |
 | `MARIADB_ROOT_PASSWORD` | `lb_root_password` |
 | `MARIADB_REPL_PASSWORD` | `lb_repl_password` (user replikasi antar node) |
 | `MARIADB_MONITOR_PASSWORD` | `lb_monitor_password` (user monitor MaxScale; juga ditulis di `docker/maxscale/maxscale.cnf`) |
@@ -107,9 +107,12 @@ MaxScale, yang menjadi satu-satunya alamat bagi aplikasi.
 
   Data yang sempat ditulis ke node lama **hilang**. Itu disengaja; menggabungkan dua
   riwayat otomatis tidak bisa dilakukan dengan benar.
-- **RPO > 0.** Tulisan yang sudah dijawab sukses tetap bisa hilang bila primary mati
-  sebelum event sampai ke replika. Ukurannya dibaca dari lag replika; `make test-db`
-  mengukurnya langsung dengan mematikan primary.
+- **RPO > 0.** Recovery Point Objective (jumlah tulisan yang sudah dijawab sukses ke
+  aplikasi tetapi hilang saat failover) pada replikasi asinkron tidak pernah dijamin
+  nol. Ukurannya dibaca dari lag replika; `make test-db` mengukurnya langsung dengan
+  mematikan primary. Setiap transaksi diberi penanda **GTID** (`domain-server-seq`)
+  dan ketiga node memakai `--sync-binlog=1`, sehingga replika melanjutkan dari posisi
+  transaksi yang presisi tanpa bergantung pada nama file binlog.
 
 Melihat keadaan sekarang:
 

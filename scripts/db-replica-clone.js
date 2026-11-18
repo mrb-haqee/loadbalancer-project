@@ -5,7 +5,7 @@
  * Dipakai dua peristiwa yang berbeda:
  * - `make db-up` / `make db-reset`: replika baru (volume kosong) harus diisi
  *   sebelum bisa mengejar primary.
- * - `make db-rejoin NODE=mariadb-primary`: node yang baru kembali hidup (mis.
+ * - `make db-rejoin DB_NODE=mariadb-primary`: node yang baru kembali hidup (mis.
  *   primary lama setelah failover) harus dibuang datanya yang mungkin sudah
  *   bercabang, lalu di-clone ulang sebagai replika.
  *
@@ -231,13 +231,17 @@ function dumpFrom(primary) {
     throw new Error(`${primary}: mariadb-dump gagal: ${(result.stderr || '').trim()}`);
   }
   const dump = result.stdout ?? '';
-  const gtid = dump.match(/SET\s+(?:@@)?GLOBAL\s+gtid_slave_pos\s*=\s*'([^']+)'/i);
+  // `gtid_slave_pos=''` adalah posisi GTID sah ketika binlog primary baru
+  // di-reset dan belum punya transaksi; regex harus mengizinkan string kosong
+  // (`[^']*`) agar replika tetap memakai `MASTER_USE_GTID=slave_pos` (wajib bagi
+  // MaxScale `mariadbmon`), bukan jatuh ke file/pos.
+  const gtid = dump.match(/SET\s+(?:@@)?GLOBAL\s+gtid_slave_pos\s*=\s*'([^']*)'/i);
   const filePosition = dump.match(
     /CHANGE\s+MASTER\s+TO\s+MASTER_LOG_FILE\s*=\s*'([^']+)'\s*,\s*MASTER_LOG_POS\s*=\s*(\d+)/i,
   );
   return {
     dump,
-    gtidPosition: gtid?.[1] ?? null,
+    gtidPosition: gtid ? gtid[1] : null,
     logFile: filePosition?.[1] ?? null,
     logPosition: filePosition?.[2] ?? null,
   };
@@ -258,7 +262,7 @@ export async function cloneNode(node, primary) {
   console.log(`[clone] ${node} ← ${primary} ...`);
 
   const { dump, gtidPosition, logFile, logPosition } = dumpFrom(primary);
-  if (!gtidPosition && !(logFile && logPosition)) {
+  if (gtidPosition === null && !(logFile && logPosition)) {
     throw new Error('dump tidak memuat posisi replikasi (periksa --master-data=2 --gtid dan log_bin di primary).');
   }
 
@@ -291,7 +295,7 @@ export async function cloneNode(node, primary) {
   // urutan seq_no-nya tidak nyambung.
   must(node, 'RESET MASTER;');
 
-  if (gtidPosition) {
+  if (gtidPosition !== null) {
     must(node, `SET GLOBAL gtid_slave_pos = ${sqlString(gtidPosition)};`);
   }
 
@@ -306,7 +310,10 @@ export async function cloneNode(node, primary) {
     // seluruh stack lain juga tanpa TLS, jadi dimatikan eksplisit — bukan
     // dibiarkan bergantung pada sertifikat yang kebetulan ada.
     'MASTER_SSL = 0,',
-    gtidPosition ? 'MASTER_USE_GTID = slave_pos;' : `MASTER_LOG_FILE = ${sqlString(logFile)}, MASTER_LOG_POS = ${logPosition};`,
+    // Interval reconnect pendek agar replika tidak menggantung 60 detik (default)
+    // di status `Connecting` setelah primary yang dimonitor sempat restart.
+    'MASTER_CONNECT_RETRY = 2,',
+    gtidPosition !== null ? 'MASTER_USE_GTID = slave_pos;' : `MASTER_LOG_FILE = ${sqlString(logFile)}, MASTER_LOG_POS = ${logPosition};`,
   ].join(' ');
   must(node, changeMaster);
   must(node, 'START SLAVE;');
@@ -321,18 +328,34 @@ export async function cloneNode(node, primary) {
   console.log(`[clone] ${node} mulai mereplikasi dari ${primary}`);
 }
 
+function isNodeRunning(node) {
+  const ps = spawnSync('docker', [...COMPOSE, 'ps', '--status', 'running', '--services'], {
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (ps.status !== 0) return true;
+  const running = (ps.stdout ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return running.includes(node);
+}
+
 /**
  * Pastikan setiap node di `targets` mereplikasi dari primary aktif.
  * Replika yang sudah sehat dilewati (idempotent).
  */
 export async function ensureReplication({ targets = null, force = false } = {}) {
-  // Tunggu hanya node yang benar-benar dipakai. `make db-rejoin DB_NODE=x`
-  // tidak boleh gagal karena replika lain kebetulan sedang mati.
-  for (const node of targets ?? NODES) {
+  // Jika `targets` eksplisit (`make db-rejoin DB_NODE=x`), node itu wajib hidup.
+  // Jika tanpa argumen (`make db-up`), node yang memang sedang dimatikan
+  // dilewati dengan peringatan supaya cluster 2-node pasca-failover tidak macet.
+  const candidates = targets ?? NODES.filter((node) => {
+    if (isNodeRunning(node)) return true;
+    console.warn(`[clone] peringatan: ${node} sedang tidak berjalan; dilewati`);
+    return false;
+  });
+  for (const node of candidates) {
     await waitForNode(node);
   }
   const primary = findPrimaryNode();
-  const wanted = targets ?? NODES.filter((node) => node !== primary);
+  const wanted = targets ?? candidates.filter((node) => node !== primary);
   for (const node of wanted) {
     if (node === primary) {
       console.log(`[clone] ${node} adalah primary aktif; dilewati`);

@@ -78,36 +78,34 @@ _Avoid_: Agent database, sidecar
 
 ## Cluster Database
 
+**Gerbang Database**:
+Pintu masuk tunggal bagi aplikasi menuju cluster database yang meneruskan setiap koneksi ke Primary aktif dan mengalihkannya saat terjadi Failover Database.
+_Avoid_: Proxy database, router database
+
 **Primary**:
-Node database yang menerima penulisan. Peran ini melekat pada node, bukan pada nama container: setelah failover, Primary bisa bernama `mariadb-replica-1`.
+Satu-satunya node database di dalam cluster yang berhak menerima penulisan dan pembacaan dari aplikasi. Peran ini melekat pada node yang sedang menjabat, bukan pada nama awalnya.
 _Avoid_: Master, server utama
 
 **Replika**:
-Node database yang menyalin event dari Primary secara Asinkron dan menolak penulisan dari user aplikasi. Replika tidak melayani pembacaan klien.
-_Avoid_: Slave, secondary, read replica (karena tidak melayani baca)
+Node database yang menyalin perubahan dari Primary melalui Replikasi Asinkron dan menolak penulisan dari aplikasi. Replika hanya menjadi kandidat pengganti dan tidak melayani pembacaan klien.
+_Avoid_: Slave, secondary, read replica
 
 **Replikasi Asinkron**:
-Penyalinan event dari Primary ke Replika yang tidak menunggu konfirmasi Replika sebelum transaksi dianggap selesai. Konsekuensinya RPO selalu lebih besar dari nol.
+Penyalinan perubahan dari Primary ke Replika tanpa menunggu konfirmasi Replika sebelum transaksi dianggap selesai oleh aplikasi. Konsekuensinya perubahan terakhir dapat hilang bila Primary mati sebelum tersalin.
 _Avoid_: Sinkronisasi, mirroring
 
-**GTID**:
-Identitas global untuk setiap transaksi (`domain-server-seq`) sehingga Replika dapat melanjutkan dari posisi yang benar tanpa bergantung pada nama file binlog.
-
 **Lag**:
-Selisih waktu antara event terakhir di Primary dan event terakhir yang sudah diterapkan Replika (`Seconds_Behind_Master`). Lag adalah batas atas data yang hilang bila Primary mati saat itu juga.
+Selisih waktu antara perubahan terakhir di Primary dan perubahan terakhir yang sudah diterapkan oleh Replika, yang menjadi batas atas kehilangan data bila Primary mati saat itu juga.
 _Avoid_: Delay, keterlambatan
 
-**RPO (Recovery Point Objective)**:
-Jumlah penulisan yang sudah dijawab sukses ke aplikasi tetapi hilang saat failover. Diukur, bukan diasumsikan.
-
 **Failover Database**:
-Pemindahan peran Primary ke salah satu Replika secara otomatis ketika Primary tidak lagi menjawab, dilakukan oleh monitor MaxScale. Koneksi aplikasi ikut dialihkan karena aplikasi hanya mengenal satu alamat `maxscale:4006`.
-_Avoid_: Switchover (itu perpindahan yang direncanakan)
+Pemindahan peran Primary ke Replika yang paling mutakhir secara otomatis ketika Primary berhenti menjawab, sehingga koneksi baru lewat Gerbang Database langsung dilayani Primary baru.
+_Avoid_: Switchover
 
 **Rejoin**:
-Pengembalian node yang sebelumnya mati ke cluster secara manual: datanya dibuang, lalu di-clone ulang dari Primary yang sah. Sengaja tidak otomatis supaya dua riwayat yang bercabang tidak digabung diam-diam.
+Pengembalian node yang sebelumnya keluar dari cluster secara manual dengan membuang riwayat lokalnya dan menyalin ulang isi Primary yang sah. Sengaja tidak otomatis agar riwayat yang bercabang tidak digabung diam-diam.
 _Avoid_: Recovery, repair
 
 **Split Brain**:
-Keadaan ketika lebih dari satu node menerima penulisan. Di topologi ini dicegah dengan memaksa `read_only=ON` pada semua node non-Primary, dan diperingatkan lewat alert `db-multiple-writable`.
+Keadaan terlarang ketika lebih dari satu node di dalam cluster sama-sama menerima penulisan sehingga membentuk dua riwayat data yang saling bertentangan.
 _Avoid_: Dual master

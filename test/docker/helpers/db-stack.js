@@ -186,12 +186,24 @@ export async function waitForMaxscale({ timeoutMs = 120000 } = {}) {
   );
 }
 
-/** Nyalakan cluster lengkap dengan urutan yang sama seperti `make db-up`. */
+/** Nyalakan cluster lengkap ke kondisi awal bersih untuk pengujian. */
 export async function bringUp() {
+  // Hentikan MaxScale dulu agar rolling recreate node MariaDB (mis. saat flag
+  // command berubah) tidak memicu failover palsu dan cache DNS IP lama.
+  dbCompose(['stop', 'maxscale'], { allowFail: true });
   dbCompose(['up', '-d', ...NODES]);
+  await waitFor(
+    () => NODES.every((node) => nodeSql(node, 'SELECT 1') !== null),
+    { timeoutMs: 120000, label: 'ketiga node MariaDB menjawab' },
+  );
+  for (const node of NODES) {
+    nodeSql(node, 'STOP SLAVE; RESET SLAVE ALL;');
+    nodeSql(node, `SET GLOBAL read_only = ${node === PRIMARY ? 'OFF' : 'ON'}`);
+  }
   runScript('db-grant-users.js');
   runScript('db-replica-clone.js', ['--force']);
-  dbCompose(['up', '-d', 'maxscale', 'adminer']);
+  dbCompose(['up', '-d', '--force-recreate', 'maxscale']);
+  dbCompose(['up', '-d', 'adminer']);
   await waitForMaxscale();
 }
 
@@ -203,6 +215,10 @@ export function startNode(node) {
   dbCompose(['start', node]);
 }
 
+export function restartNode(node) {
+  dbCompose(['restart', node]);
+}
+
 /** Diagnostik yang dicetak saat test gagal. */
 export function diagnostics() {
   const ps = dbCompose(['ps'], { allowFail: true }).stdout ?? '';
@@ -212,8 +228,16 @@ export function diagnostics() {
 
 /** Kembalikan cluster ke keadaan sehat tanpa menghapus volume. */
 export function heal() {
+  dbCompose(['stop', 'maxscale'], { allowFail: true });
   dbCompose(['up', '-d', ...NODES], { allowFail: true });
+  // Paksa satu node awal yang writable supaya bootstrap idempotent walau test
+  // gagal tepat setelah failover (ketika ada >1 node read_only=OFF).
+  for (const node of NODES) {
+    nodeSql(node, 'STOP SLAVE; RESET SLAVE ALL;');
+    nodeSql(node, `SET GLOBAL read_only = ${node === PRIMARY ? 'OFF' : 'ON'}`);
+  }
   runScript('db-grant-users.js', [], { allowFail: true });
   runScript('db-replica-clone.js', ['--force'], { allowFail: true });
-  dbCompose(['up', '-d', 'maxscale', 'adminer'], { allowFail: true });
+  dbCompose(['up', '-d', '--force-recreate', 'maxscale'], { allowFail: true });
+  dbCompose(['up', '-d', 'adminer'], { allowFail: true });
 }

@@ -585,7 +585,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | Primary lama hidup tanpa rejoin | MaxScale tetap melayani node baru (`server_id` pindah, bukan balik) — `auto_rejoin=false` terbukti |
 | Tulis langsung ke replika sebagai `lb_app` | ditolak `ERROR 1290 ... read-only` |
 | Data bercabang di primary lama | **hilang** setelah rejoin (dibuang, bukan digabung); jumlah node bisa ditulis tetap 1 |
-| `make test-db` | **6/6 lulus** dalam **87 detik** (termasuk stop/start container sungguhan) |
+| `make test-db` | **7/7 lulus** dalam **186 detik** (failover + restart promoted primary + rejoin) |
 | MariaDB dimatikan saat CRUD | **503** `DATABASE_UNAVAILABLE` dalam **1,1 detik** lewat Traefik; `/health` tetap **200**; GET kembali **200** setelah DB hidup |
 | Adminer | `http://adminer.localhost` → **200** (login server `maxscale`, user `lb_app` melihat `registered_servers`); cadangan `127.0.0.1:8081` → **200**; tidak ada node DB yang punya port host |
 | Validasi & konflik | port 0 → **400** + `details`; nama `server-1` duplikat → **409**; id tak ada → **404**; PATCH koleksi → **405** + `Allow` |
@@ -612,7 +612,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - **`maxscale:4006` adalah satu-satunya pintu aplikasi.** MaxScale sendiri tidak punya cadangan; kalau container MaxScale mati, aplikasi kehilangan database walau ketiga node MariaDB sehat. `restart: unless-stopped` hanya menutup crash proses, bukan jaminan uptime.
 - **Replika tidak menambah kapasitas baca.** Semua SELECT tetap ke primary. Menambah replika hanya menambah kandidat failover.
 - **`auto_rejoin=false`**: node yang kembali harus di-rejoin manual, dan datanya yang bercabang dibuang. Tidak ada penggabungan otomatis, dan itu memang tidak mungkin dilakukan dengan benar.
-- Password `lb_monitor` ditulis **dua kali**: di `.env` (`MARIADB_MONITOR_PASSWORD`) dan di `docker/maxscale/maxscale.cnf`, karena MaxScale tidak membaca env. Ganti keduanya lalu `make db-grant-users` + restart MaxScale.
+- Password `lb_monitor` dan `lb_app` ditulis **dua kali**: di `.env` (`MARIADB_MONITOR_PASSWORD`, `MARIADB_PASSWORD`) dan di `docker/maxscale/maxscale.cnf`, karena MaxScale tidak membaca env. Ganti keduanya lalu `make db-grant-users` + restart MaxScale.
 - `lb_app` punya `SELECT` pada `mysql.*`. Itu dibutuhkan MaxScale untuk menyusun cache autentikasi; isi database aplikasi tetap dibatasi `GRANT ... ON lb_demo.*`.
 - Listener MaxScale di demo ini **tanpa TLS**, sehingga klien MariaDB 11.4 perlu `--skip-ssl` saat menyambung langsung (backend Node tidak terpengaruh: `mysql2` tidak memaksa TLS).
 - `make db-reset` sekarang menghapus **tiga** volume (`lb-db-data`, `lb-db-replica-1-data`, `lb-db-replica-2-data`).

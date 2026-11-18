@@ -24,6 +24,7 @@ import {
   heal,
   nodeSql,
   replication,
+  restartNode,
   roles,
   runScript,
   startNode,
@@ -157,6 +158,34 @@ test(
       assert.ok(lost <= ackedBeforeFailure, 'tidak mungkin kehilangan lebih banyak dari yang di-ACK');
     });
 
+    await t.test('promoted primary tetap bisa ditulis setelah container-nya restart, dan skrip toleran node mati', async () => {
+      // Skrip grant/clone tanpa argumen harus jalan walau oldPrimary sedang mati.
+      runScript('db-grant-users.js');
+      runScript('db-replica-clone.js');
+
+      const promoted = roles().find((entry) => entry.serverId === newServerId);
+      assert.ok(promoted, 'node promoted primary harus ditemukan');
+      restartNode(promoted.node);
+
+      // Replika punya `--read-only=ON` di CLI compose; `enforce_writable_master=true`
+      // di MaxScale wajib membuka kembali `read_only=OFF` agar aplikasi tetap bisa menulis.
+      await waitFor(
+        () => {
+          const write = appSql(
+            `INSERT INTO ${DATABASE}.registered_servers (name, host, port) VALUES ('${marker('restart', 0)}', 'x', 3000)`,
+          );
+          return write.ok;
+        },
+        { timeoutMs: 60000, intervalMs: 1000, label: 'tulis lewat MaxScale setelah promoted primary restart' },
+      ).catch((error) => {
+        throw new Error(`${error.message}\n${diagnostics()}`);
+      });
+
+      const afterRestart = appSql('SELECT @@read_only');
+      assert.ok(afterRestart.ok, afterRestart.err);
+      assert.equal(afterRestart.out, '0', 'promoted primary harus kembali read_only=0 setelah restart');
+    });
+
     await t.test('primary lama tidak kembali otomatis, dan rejoin membuang datanya', async () => {
       startNode(oldPrimary.node);
       await waitFor(() => nodeSql(oldPrimary.node, 'SELECT 1') !== null, {
@@ -215,9 +244,13 @@ test(
       assert.equal(writable.length, 1);
 
       for (const entry of list.filter((item) => item.readOnly === true)) {
-        const status = replication(entry.node);
-        assert.equal(status?.Slave_IO_Running, 'Yes', `${entry.node} IO`);
-        assert.equal(status?.Slave_SQL_Running, 'Yes', `${entry.node} SQL`);
+        await waitFor(
+          () => {
+            const status = replication(entry.node);
+            return status?.Slave_IO_Running === 'Yes' && status?.Slave_SQL_Running === 'Yes';
+          },
+          { timeoutMs: 15000, label: `replikasi ${entry.node} kembali Yes` },
+        );
       }
 
       const ping = appSql('SELECT @@server_id');

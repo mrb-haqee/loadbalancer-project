@@ -49,7 +49,7 @@ Batas yang disepakati sebelum memilih solusi:
 Memilih **(1)**, dengan penegasan:
 
 - **Tiga node, satu pintu.** `mariadb-primary`, `mariadb-replica-1`, `mariadb-replica-2`
-  (server-id 1/2/3), semuanya `log-bin` + `gtid-strict-mode=ON`,
+  (server-id 1/2/3), semuanya `log-bin` + `sync-binlog=1` + `gtid-strict-mode=ON`,
   `log-slave-updates=ON` supaya node yang dipromosikan bisa menjadi sumber replikasi.
   Aplikasi memakai `DB_HOST=maxscale`, `DB_PORT=4006`.
 - **Nama bukan peran.** `mariadb-primary` hanya peran awal. Skrip mencari primary dari
@@ -59,7 +59,9 @@ Memilih **(1)**, dengan penegasan:
   `super_read_only`; `read_only` cukup karena user aplikasi bukan superuser.
 - **Failover otomatis, rejoin manual.** Monitor: interval 1 detik,
   `master_failure_timeout=3s`, `auto_failover=true`, `auto_rejoin=false`,
-  `verify_master_failure=true`, `enforce_read_only_slaves=true`.
+  `verify_master_failure=true`, `enforce_read_only_slaves=true`,
+  `enforce_writable_master=true` (agar replika yang sudah dipromosikan tetap writable
+  bila container-nya ikut restart).
 - **Clone lewat `mariadb-dump` + restore**, bukan `xtrabackup`/`rsync`: cukup untuk
   ukuran data demo dan tidak butuh privilege filesystem. `scripts/db-replica-clone.js`
   membaca GTID dari dump, `RESET MASTER` sebelum/sesudah restore, `MASTER_SSL=0` (11.4
@@ -68,8 +70,8 @@ Memilih **(1)**, dengan penegasan:
   `lb_exporter`) dibuat di setiap node tanpa masuk binlog, supaya tidak terjadi konflik
   `seq_no` GTID saat clone.
 - **MaxScale butuh grant admin granular.** `SUPER` tidak cukup; `lb_monitor` mendapat
-  daftar `*_ADMIN` eksplisit. Password monitor ditulis dua kali (`.env` dan
-  `docker/maxscale/maxscale.cnf`) karena MaxScale tidak membaca env.
+  daftar `*_ADMIN` eksplisit. Password `lb_monitor` dan `lb_app` ditulis dua kali
+  (`.env` dan `docker/maxscale/maxscale.cnf`) karena MaxScale tidak membaca env.
 - **Satu exporter per node.** Satu exporter hanya bisa menembak satu alamat; digabung,
   `mysql_up` tidak bisa menunjukkan node mana yang mati.
 

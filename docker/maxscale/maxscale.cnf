@@ -10,16 +10,19 @@
 # - `readwritesplit`: ia mengirim sebagian SELECT ke replika. Dengan replikasi
 #   asinkron itu berarti "POST lalu GET" bisa membaca data lama atau 404.
 # - `auto_rejoin`: primary lama yang kembali bisa membawa transaksi yang tidak
-#   pernah sampai ke replika. Pemulihannya manual (`make db-rejoin
-#   NODE=mariadb-primary`) supaya data bercabang tidak masuk diam-diam.
+#   pernah sampai ke replika. Pemulihannya manual (`make db-rejoin 
+Queue limit reached #   DB_NODE=mariadb-primary`) supaya data bercabang tidak masuk diam-diam.
 #
-# Password `lb_monitor` ditulis di sini karena MaxScale tidak membaca env.
-# Nilainya sama dengan default `MARIADB_MONITOR_PASSWORD`; kalau diganti di
-# `.env`, ganti juga baris di bawah (dan jalankan `make db-grant-users`).
+# Password `lb_monitor` dan `lb_app` ditulis di sini karena MaxScale tidak
+# membaca env. Nilainya sama dengan default `MARIADB_MONITOR_PASSWORD` dan
+# `MARIADB_PASSWORD`; kalau diganti di `.env`, ganti juga baris di bawah (dan
+# jalankan `make db-grant-users` + restart MaxScale).
 
 [maxscale]
 threads=auto
-log_info=true
+# `log_info=false` supaya setiap query CRUD tidak dicetak per sesi dan
+# membanjiri Loki; keputusan failover tetap masuk lewat `log_notice`/`warning`.
+log_info=false
 log_warning=true
 log_notice=true
 
@@ -64,6 +67,10 @@ master_failure_timeout=3000ms
 failcount=1
 # Node yang bukan primary dipaksa read_only, termasuk primary lama yang kembali.
 enforce_read_only_slaves=true
+# Replika punya `--read-only=ON` di CLI compose. Bila ia sudah dipromosikan jadi
+# primary lalu container-nya restart, ia naik lagi dengan `read_only=ON`; opsi
+# ini menyuruh MaxScale membuka kembali `read_only=OFF` pada master yang sah.
+enforce_writable_master=true
 # Gagal cepat saat node di belakang MaxScale tidak menjawab.
 backend_connect_timeout=2s
 

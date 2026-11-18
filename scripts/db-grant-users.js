@@ -139,14 +139,40 @@ function grantSql({ withApplicationDatabase }) {
     .join('\n');
 }
 
+function runningNodes() {
+  const ps = spawnSync('docker', [...COMPOSE, 'ps', '--status', 'running', '--services'], {
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (ps.status !== 0) return NODES;
+  const running = (ps.stdout ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return NODES.filter((node) => running.includes(node));
+}
+
 try {
+  const explicitTargets = process.argv.slice(2).filter((arg) => NODES.includes(arg));
+  const live = runningNodes();
+  const targets = explicitTargets.length > 0 ? explicitTargets : live;
+
+  for (const node of NODES) {
+    if (!targets.includes(node) && explicitTargets.length === 0) {
+      console.warn(`[db-grant-users] peringatan: ${node} sedang tidak berjalan; dilewati`);
+    }
+  }
+  if (targets.length === 0) {
+    throw new Error('tidak ada node MariaDB yang sedang berjalan.');
+  }
+
+  for (const node of targets) {
+    await waitForNode(node);
+  }
+
   // Database aplikasi hanya dibuat di node yang bisa ditulis. Nama service
   // TIDAK dipakai: setelah failover, `mariadb-replica-1` bisa menjadi primary.
   const writable = nodeRoles().filter((entry) => !entry.readOnly);
   const primary = writable.length === 1 ? writable[0].node : null;
 
-  for (const node of NODES) {
-    await waitForNode(node);
+  for (const node of targets) {
     // Replika mendapat database dari dump saat clone; `CREATE DATABASE` di sana
     // hanya akan membuatnya tampak siap sebelum datanya ada.
     const result = mysqlOnNode(node, grantSql({ withApplicationDatabase: node === primary }), {

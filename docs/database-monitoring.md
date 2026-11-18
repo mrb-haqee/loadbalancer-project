@@ -312,7 +312,7 @@ Angka terukur pada mesin ini (Windows + Docker Desktop, `make test-db`):
 | Rejoin primary lama | **6,0 detik** sampai `read_only=ON` dengan IO/SQL `Yes` |
 | Primary lama hidup tanpa rejoin | MaxScale tetap melayani node baru — `auto_rejoin=false` bekerja |
 | Tulis ke replika sebagai `lb_app` | ditolak (`ERROR 1290 ... read-only`) |
-| `make test-db` | **6/6 lulus** dalam **87 detik** |
+| `make test-db` | **7/7 lulus** dalam **186 detik** |
 | Log | baris `[mariadbmon] Performing automatic failover` dan `Failover ... performed` muncul di Loki |
 
 ### 2. Seluruh database mati: gagal dengan jelas

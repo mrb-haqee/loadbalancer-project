@@ -77,6 +77,8 @@ x-db-env: &db-env
   DB_NAME: ${MARIADB_DATABASE:-lb_demo}
   DB_USER: ${MARIADB_USER:-lb_app}
   DB_PASSWORD: ${MARIADB_PASSWORD:-lb_app_password}
+  DB_CONNECTION_LIMIT: "10"
+  DB_QUEUE_LIMIT: "100"
 
 services:
   # Hanya service ini yang mem-build image; server-2/3 memakai image yang sama.

@@ -14,7 +14,7 @@ name: lb-db
 # - Replika tidak melayani klien. Semua baca dan tulis lewat MaxScale ke primary,
 #   sehingga "tulis lalu baca" tidak pernah membaca data basi.
 # - Pemulihan (primary lama kembali) SENGAJA manual: `make db-rejoin
-#   NODE=mariadb-primary`. `auto_rejoin` dimatikan supaya node yang datanya
+#   DB_NODE=mariadb-primary`. `auto_rejoin` dimatikan supaya node yang datanya
 #   bercabang tidak diam-diam masuk lagi ke cluster.
 #
 # MariaDB dan MaxScale tidak dipublikasikan ke host dan tidak dirutekan Traefik:
@@ -66,6 +66,9 @@ services:
       # binlog: replika hanya perlu `gtid_slave_pos` yang benar.
       - "--gtid-strict-mode=ON"
       - "--log-slave-updates=ON"
+      # Flush binlog setiap commit supaya posisi GTID binlog tidak tertinggal dari
+      # InnoDB (`innodb_flush_log_at_trx_commit=1`) saat proses/container mati mendadak.
+      - "--sync-binlog=1"
     volumes:
       - lb-db-data:/var/lib/mysql
       # Skema + seed hanya dibaca saat volume masih kosong. Replika TIDAK
@@ -97,6 +100,7 @@ services:
       # melanjutkan replikasi dari sana. Tanpa ini MaxScale memperingatkan
       # "replication will break for lagging replicas".
       - "--log-slave-updates=ON"
+      - "--sync-binlog=1"
     volumes:
       - lb-db-replica-1-data:/var/lib/mysql
 
@@ -114,6 +118,7 @@ services:
       - "--read-only=ON"
       - "--relay-log=relay-bin"
       - "--log-slave-updates=ON"
+      - "--sync-binlog=1"
     volumes:
       - lb-db-replica-2-data:/var/lib/mysql
 
@@ -143,6 +148,12 @@ services:
       - "--config=/etc/maxscale.cnf"
     volumes:
       - ./docker/maxscale/maxscale.cnf:/etc/maxscale.cnf:ro
+    healthcheck:
+      test: ["CMD", "maxctrl", "list", "servers"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     networks:
       - lb-net
     depends_on:
@@ -173,7 +184,7 @@ services:
       - lb-net
     depends_on:
       maxscale:
-        condition: service_started
+        condition: service_healthy
       mariadb-primary:
         condition: service_healthy
     restart: unless-stopped
