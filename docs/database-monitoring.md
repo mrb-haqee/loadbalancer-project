@@ -141,33 +141,33 @@ Counter disimpan di memori proses: angka kembali 0 saat container backend dibuat
 ## Dashboard
 
 Buka `http://grafana.localhost/d/db-monitoring` (uid `db-monitoring`, folder
-`Database`). Dashboard ini juga muncul di daftar dashboard Grafana.
+`database`). Dashboard ini juga muncul di daftar dashboard Grafana.
 
-| Panel | Isi |
-|---|---|
-| Node bisa ditulis (harus 1) | `count(mysql_global_variables_read_only{job="mariadb"} == 0) or vector(0)`, mapping `TIDAK ADA` / `1` / `SPLIT BRAIN` |
-| Error DB dari backend / menit | `sum(rate(lb_db_errors_total{code!="ER_DUP_ENTRY"}[2m])) * 60` |
-| Koneksi aktif | `sum(mysql_global_status_threads_connected)` |
-| Slow query (5 menit) | `sum(increase(mysql_global_status_slow_queries[5m]))` |
-| Query MariaDB / detik | `rate(mysql_global_status_queries[1m])`, legenda `{{node}}` |
-| Koneksi MariaDB | connected, running, max_connections per node |
-| Slow query / detik | `rate(mysql_global_status_slow_queries[5m])` per node |
-| InnoDB buffer pool hit ratio | 1 − reads / read_requests per node |
-| Koneksi gagal / terputus | rate `aborted_connects` dan `aborted_clients` per node |
-| Latensi query CRUD | p95 + rata-rata dari histogram backend |
-| Query CRUD per operasi & error per kode | rate `lb_db_queries_total` dan `lb_db_errors_total` |
-| Peran node | tabel `mysql_global_variables_read_only`: `PRIMARY` (0) atau `replika` (1), satu baris per node |
-| Replikasi jalan (1 = ya) | `mysql_slave_status_slave_io_running` dan `_slave_sql_running`, legenda `{{node}} io` / `{{node}} sql` |
-| Lag replika (detik) = batas RPO | `mysql_slave_status_seconds_behind_master`, legenda `{{node}}` |
-| Log error MariaDB + MaxScale + backend | panel log dari Loki |
-| Alert database | panel `alertlist` (firing/pending/no data) |
+Urutan panel sengaja mengikuti pertanyaan, bukan urutan metrik:
 
-Panel per-node memakai legenda `{{node}}`, jadi satu grafik menampung tiga node dan nama
-node tetap terbaca walau IP container berubah.
+| Baris | Pertanyaan | Isi |
+|---|---|---|
+| Kartu atas | Apakah cluster sehat? | `Primary aktif` (harus 1), `Replika sehat` (harus 2), `Lag replika maksimum`, `Error DB/menit`, `Koneksi terpakai`, `Cache InnoDB terpakai` |
+| 1 | Siapa Primary, siapa Replika? | Tabel `Status per node`: Node · Koneksi · Peran · Thread IO · Thread SQL · Lag (setara `make db-status`) |
+| 2 | Apakah replikasi mengejar? | `Thread replikasi` (IO/SQL per node) dan `Lag replika` dengan garis ambang 10 detik |
+| 3 | Seberapa sibuk server? | `Query MariaDB/detik`, `Koneksi per node`, `Slow query/detik`, `Koneksi gagal/terputus` |
+| 4 | Apakah aplikasi terganggu? | `Latensi query CRUD`, `Query CRUD per operasi`, `Error DB per kode` |
+| 5 | Apa penyebabnya? | `Alert database` (hanya label `component=database`) dan log MariaDB/MaxScale/backend |
 
-Warna panel status memakai threshold: hijau = normal, merah = bermasalah. Dashboard
-di-provision dari `monitoring/grafana/dashboards/db/database.json`
-(`allowUiUpdates: false`), jadi edit permanen dilakukan di file itu.
+Setiap panel punya ikon ⓘ berisi **Arti · Normal · Jika merah**, dan tiap baris sekat
+menyebut pertanyaan yang dijawab. Tautan di bar atas berpindah ke `LB Realtime`,
+`Pengujian k6`, dan pemicu Run k6 tanpa kehilangan konteks.
+
+Panel per-node memakai legenda `{{node}}`. Legenda sengaja dibuat unik per seri
+(`{{node}} · terbuka`, `{{node}} · jalan`, `{{node}} · batas`) supaya tiga garis tidak
+tampil dengan nama sama. Tabel `Status per node` menggabungkan lima query dengan
+transformasi `labelsToFields` → `joinByField` → `filterFieldsByName` → `organize`, jadi
+kolomnya manusiawi, bukan nama metrik mentah.
+
+Warna panel status memakai threshold: hijau = normal, kuning = waspada, merah =
+bermasalah. Dashboard di-provision dari `monitoring/grafana/dashboards/db/database.json`
+(`allowUiUpdates: false`), jadi edit permanen dilakukan di file itu. Grafana membaca ulang
+file setiap 30 detik; kalau tidak berubah, restart container Grafana.
 
 ## Log error
 
@@ -363,7 +363,7 @@ master, klien menerima 503 cepat — bukan menunggu sampai `responseHeaderTimeou
 | `mysql_up` = 0 tetapi exporter hidup | User ada tapi hak kurang, atau node-nya memang mati. Cek `SHOW GRANTS FOR 'lb_exporter'@'%'` lewat Adminer/root; harus ada `PROCESS`, `REPLICATION CLIENT`, `SLAVE MONITOR`. |
 | Satu target `mariadb` hilang setelah upgrade dari topologi lama | Exporter lama `mysqld-exporter` masih ada di project: `docker compose -p lb-k6 -f docker-compose.monitoring.yml up -d --remove-orphans`. |
 | `mysql_slave_status_*` tidak ada | Normal di node yang sedang menjadi primary, dan pada node yang mati (lihat `mysql_up`). Kalau hilang di replika yang hidup, replikasinya berhenti — `make db-status`. |
-| Panel "Node bisa ditulis" menunjukkan 2 / SPLIT BRAIN | Bekas primary hidup tanpa `read_only=ON`. Jangan menulis ke dua-duanya: `make db-status`, lalu `make db-rejoin DB_NODE=<node>`. |
+| Kartu `Primary aktif` menunjukkan 2 / SPLIT BRAIN | Bekas primary hidup tanpa `read_only=ON`. Jangan menulis ke dua-duanya: `make db-status`, lalu `make db-rejoin DB_NODE=<node>`. |
 | Dashboard kosong setelah `k6-up` | Grafana belum membaca provisioning baru: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`. |
 | Target `mariadb` tidak ada di Prometheus | `prometheus.yml` belum dimuat: `docker restart lb-k6-prometheus-1`. Cek `/api/v1/targets` lewat Grafana. |
 | Alert `mariadb-down` masih tampil padahal sudah dihapus dari YAML | Grafana tidak menghapus rule yang hilang dari file. `rules.yml` memuat blok `deleteRules` untuk itu; kalau masih ada, restart Grafana lalu cek `/api/v1/provisioning/alert-rules`. |

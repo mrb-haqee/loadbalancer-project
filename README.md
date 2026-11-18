@@ -341,6 +341,8 @@ container (lb.logs=true) ──> alloy ──> loki:3100 ───────�
 
 Prometheus, Loki, Alloy, dan `mysqld-exporter` **tidak** diekspos ke host maupun lewat Traefik; semuanya hanya dikonsumsi Grafana atau runner internal.
 
+Ketiga dashboard memakai urutan baca yang sama: **kartu kesimpulan → trafik/latensi → detail per Backend atau node → alert dan log**. Di bar atas tiap dashboard ada tautan pindah ke dua dashboard lain dan ke pemicu Run. Setiap panel punya ikon ⓘ berisi **Arti · Normal · Jika merah**, dan istilahnya mengikuti `GLOSSARY.md` (`Backend`, `Rotasi`, `Primary`, `Replika`, `Lag`, `Split Brain`, `Run`).
+
 | Perintah | Arti |
 |---|---|
 | `make k6-up` | Nyalakan Grafana + Prometheus + k6-runner + exporter MariaDB + Loki + Alloy (image diunduh/di-build sekali) |
@@ -359,7 +361,7 @@ make k6-run         # k6 di container: 100 req/detik selama 15 detik
 make stack-down     # urutan shutdown sudah diurus script
 ```
 
-Panel dashboard: total request, request gagal, check lulus, VU maksimum, request/detik, latensi p50/p95/p99, sebaran request per server, dan status code. Ada variabel **Run** untuk memfilter satu eksekusi tertentu — tiap run diberi tag `run` berisi timestamp, jadi run lama tetap bisa dibandingkan.
+Dashboard `k6-lb` berisi **10 panel data** dalam empat baris: ringkasan (total request, gagal, check lulus, VU maksimum), beban (request/detik + latensi p50/p95/p99 dengan ambang 0,5 detik), sebaran (tabel jumlah + porsi per Backend, status code per kelompok), dan detail (VU aktif vs maksimum, iterasi/detik). Variabel **Run** default ke **Run terbaru** dan tidak lagi punya opsi `All`; memilih beberapa Run sekaligus hanya dipakai bila memang ingin membandingkan.
 
 Sebaran per server memakai satu metric `served` (`k6_served_total` di Prometheus) dengan label `server`, dan panelnya satu query `sum by (server) (...)`. Jadi server baru otomatis muncul tanpa menyunting skrip k6 atau dashboard. Konsekuensinya, ringkasan konsol k6 hanya menampilkan total `served`, bukan per server.
 
@@ -376,24 +378,30 @@ Sumber angkanya dua, dan bedanya penting:
 | `lb_backend_request_duration_seconds` | tiap backend | histogram durasi, dipakai untuk p95 |
 | `up{job=...}` | Prometheus | target scrape hidup atau mati |
 
-Panel (12):
+Panel (**14 data** + 1 panduan + 6 baris sekat = 21):
 
-| Panel | Query inti |
-|---|---|
-| Total request LB berhasil (2xx) | `sum(increase(traefik_service_requests_total{service=~"demo@docker\|direct-.*@docker",code=~"2.."}[$__range]))` |
-| Total request LB error (4xx + 5xx) | `sum(increase(...{code=~"4..\|5.."}[$__range]))` |
-| Request LB masuk / detik | `sum(rate(traefik_service_requests_total{service=~"demo@docker\|direct-.*@docker"}[30s]))` |
-| Request diterima / detik | `sum(rate(lb_backend_requests_total[30s]))` |
-| Error 5xx / detik | `rate(...{code=~"5.."}[1m])` |
-| Backend sehat | `sum(max by (server) (up{job="backend"}))` (0 sampai jumlah backend) |
-| Masuk vs diterima (grafik) | dua rate di atas, satu grafik |
-| Diterima per server | `sum by (server) (rate(lb_backend_requests_total[30s]))` |
-| Masuk per service | `sum by (service) (rate(traefik_service_requests_total[30s]))` |
-| Status code | `sum by (code) (rate(...))` |
-| Latensi p95 per server | `histogram_quantile(0.95, sum by (server, le) (rate(lb_backend_request_duration_seconds_bucket[1m])))` |
-| Status target scrape | `max by (job, server) (up{job=~"backend\|traefik"})` → UP/DOWN per target |
+| Baris | Panel | Query inti |
+|---|---|---|
+| Kartu | Backend sehat | `count(up{job="backend"} == 1) or vector(0)` (0–5) |
+| Kartu | Error server (5xx) / detik | `sum(rate(traefik_service_requests_total{service=~"demo@docker\|direct-.*@docker",code=~"5.."}[1m]))` |
+| Kartu | Request masuk LB / detik | `sum(rate(...{service=~"demo@docker\|direct-.*@docker"}[1m]))` |
+| Kartu | Latensi p95 Backend | `histogram_quantile(0.95, sum by (le) (rate(lb_backend_request_duration_seconds_bucket[5m])))` |
+| 1 | Masuk LB vs diterima Backend | dua rate di atas + `sum(rate(lb_backend_requests_total[1m]))` |
+| 1 | Status code aplikasi | `2xx`, `4xx`, `5xx` dipisah tiga seri agar 5xx tidak tenggelam di sumbu yang sama |
+| 2 | Request diterima per Backend | `sum by (server) (rate(lb_backend_requests_total[1m]))` |
+| 2 | Jumlah & porsi per Backend | `increase(...[$__range])` + persentase, digabung `labelsToFields` → `joinByField` |
+| 3 | Latensi p95 per Backend | `histogram_quantile(...)`, garis ambang putus-putus 0,5 detik |
+| 3 | Latensi rata-rata per Backend | `_sum / _count` histogram |
+| 4 | Alert Load Balancer | `alertlist` difilter label `component=load-balancer`, status Normal ikut tampil |
+| 4 | Log error Backend & Traefik | Loki `{project=~"lb-traefik\|lb-demo"} \|~ "(?i)error\|warning\|..."`, nama service di awal baris |
+| 5 | Trafik internal per service | `grafana@docker`, `adminer@docker`, `k6-trigger@docker` — sengaja dipisah dari aplikasi |
+| 5 | Status target scrape | `up{job="backend"}` + `up{job="traefik"}` dengan mapping HIDUP/MATI |
 
-Selisih "masuk" dan "diterima" itu normal dan bukan bug: health check Traefik (`/health`) tidak dihitung backend, sementara `/metrics` dan `/health` sengaja dikecualikan dari counter backend agar angkanya tidak tercemar probe 2 detik.
+Selisih "masuk" dan "diterima" itu normal dan bukan bug: retry `Failover Pasif` menambah
+"masuk" tanpa menambah "diterima", health check Traefik (`/health`) tidak dihitung backend,
+sementara `/metrics` dan `/health` sengaja dikecualikan dari counter backend agar angkanya
+tidak tercemar probe 2 detik. Trafik ke Grafana, Adminer, dan pemicu k6 tidak masuk panel
+aplikasi sama sekali; ia punya panel sendiri di baris terakhir.
 
 Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/server.js`), berisi counter `lb_backend_requests_total`, `lb_backend_slow_requests_total`, histogram `lb_backend_request_duration_seconds`, serta metrik query database `lb_db_*` (lihat bagian 7c). Bisa dicek langsung:
 
@@ -572,11 +580,11 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | `grafana.localhost` / `traefik.localhost` setelah dipisah | **200**, tidak nyasar ke backend (router prioritas 200 menang atas fallback `demo` prioritas 1) |
 | `k6.localhost` saat `make k6-watch` | **200** selama run, router hilang ~6 detik setelah k6 selesai |
 | `make stack-up` dijalankan ulang | **idempotent**: "network lb-net sudah ada", container yang sudah hidup tidak dibuat ulang |
-| Dashboard `lb-realtime` saat backend hidup | 10 panel berisi data; scrape 6 target (`traefik` + 5 backend) `up=1` |
+| Dashboard `lb-realtime` saat backend hidup | 14 panel data; scrape 6 target (`traefik` + 5 backend) `up=1`; trafik aplikasi dan trafik internal dipisah |
 | 30 request manual ke `server.localhost` | test mengukur 6 request per server, tanpa gagal |
 | Klik "Run k6" di dashboard Grafana | halaman konfirmasi `GET` 200 → submit `POST` 202 → Run 15 detik selesai (1500 request) → label `run` baru muncul di Prometheus; klik kedua saat run berjalan dibalas 409 "Run masih berjalan" |
 | Tambah `server-4` di compose saja | Prometheus menemukan target `server-4` otomatis (`up=1`), panel `lb-realtime` dan sebaran k6 bertambah tanpa menyunting config monitoring |
-| Panel total `lb-realtime` (range 15m) | berhasil 16.997 · error 19; setelah 3 request 404 (server-2 dimatikan) error naik ke 22 |
+| Porsi per Backend pada Run 1501 request | server-1 **20,1%** · server-2 **20,0%** · server-3 **20,1%** · server-4 **19,9%** · server-5 **20,0%** |
 | CRUD lintas backend | POST lewat `server.localhost` dilayani `server-5` (201); GET id yang sama lewat `server-3.localhost` mengembalikan data identik (`x-served-by: server-3`) |
 | Primary dimatikan (`stop mariadb-primary`) | MaxScale mempromosikan replika; tulis lewat `maxscale:4006` gagal **~32 detik** lalu sukses lagi tanpa restart backend |
 | Rincian jendela itu | deteksi `master_down` mendominasi (~23 s), promosi + konfirmasi replika ~6 s, sisa ~3 s sampai tulis pertama dijawab |
@@ -591,7 +599,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | Validasi & konflik | port 0 → **400** + `details`; nama `server-1` duplikat → **409**; id tak ada → **404**; PATCH koleksi → **405** + `Allow` |
 | Exporter MariaDB | 3 target `mariadb` `up=1`, label `node` per node; `mysql_up=1`; `mysql_global_variables_read_only` 0 di primary dan 1 di dua replika |
 | Metrik DB backend | `curl server-1.localhost/metrics` memuat `lb_db_queries_total{operation="list",result="success"}`, histogram durasi, dan `lb_db_errors_total{code="ER_DUP_ENTRY"}` setelah POST duplikat |
-| Dashboard database | `db-monitoring` terprovisi (16 panel, folder `Database`), datasource `loki` ada, 8 alert rule database termuat |
+| Dashboard database | `db-monitoring` terprovisi (18 panel data, folder `database`), datasource `loki` ada, 8 alert rule database termuat, tabel `Status per node` setara `make db-status` |
 | Log error terpusat | baris `CRUD ditolak: nama server duplikat` dari `lb-demo-server-1-1` muncul di Loki < 10 detik; log `Version: '11.4.13-MariaDB'` dari `lb-db-mariadb-primary-1` dan baris `[mariadbmon] Performing automatic failover` dari MaxScale juga masuk |
 | Primary dimatikan (monitoring) | `mysql_up{node="mariadb-primary"}` → **0**, dua node lain tetap **1**; `mysql_slave_status_seconds_behind_master` hilang dari node yang dipromosikan (normal) |
 | Alert database | 8 rule terprovisi; `db-node-down`/`db-replica-stopped`/`db-replica-lag` memakai `for: 1m`, jadi gangguan yang pulih sendiri dalam semenit hanya terlihat di panel, belum sempat firing |
@@ -655,12 +663,13 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | Ingin bersih total (termasuk image) | `make clean` — sama dengan `make stack-down`, lalu menghapus image lokal `lb-demo`. Volume tidak disentuh. |
 | `k6 belum terpasang` | `make k6-install` (butuh Bun + akses GitHub). |
 | `k6-install` gagal HTTP 403 | Rate limit GitHub API; tunggu beberapa menit atau unduh manual rilis k6. |
-| Dashboard `k6-lb` kosong / "No data" | Pastikan sudah ada run: `make k6-run`. Cek datasource: `http://grafana.localhost/api/datasources` harus berisi `prometheus` (`isDefault: true`), dan rentang waktu dashboard mencakup waktu Run. |
-| Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards/k6` dan `.../lb`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `make k6-logs`. |
+| Dashboard `k6-lb` kosong / "No data" | Variabel **Run** tidak menemukan Run pada rentang waktu dashboard. Jalankan `make k6-run` atau klik tautan "Run k6 (15 detik)", lalu pastikan rentang waktu mencakup waktu Run. Cek juga datasource `prometheus` ada di `http://grafana.localhost/api/datasources`. |
+| Dashboard tidak muncul di Grafana | Dashboard dibaca dari tiga folder: `monitoring/grafana/dashboards/{k6,lb,db}`. Grafana memuat ulang tiap 30 detik; kalau tetap tidak muncul, `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `make k6-logs`. |
+| Tabel `Status per node` atau `Jumlah & porsi per Backend` kosong | Panel memakai transformasi `labelsToFields`/`joinByField`. Pastikan label `node`/`server` ada di query (jangan hapus `by (node)`/`by (server)`), lalu muat ulang dashboard. |
 | `lb-realtime` kosong / "No data" | Datasource `prometheus` belum ada atau Prometheus mati. Cek `http://grafana.localhost/api/datasources` (harus ada uid `prometheus`), lalu `make k6-up`. |
 | Panel "Status target scrape" merah (DOWN) | Target tidak bisa di-scrape. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml logs prometheus`. Penyebab umum: backend mati, atau Prometheus tidak menempel di `lb-net` (`make k6-down && make k6-up`). |
 | Target backend baru tidak muncul di Prometheus | Container tidak punya label `lb.monitor=true` (cek `docker inspect <container> --format '{{index .Config.Labels "lb.monitor"}}'`) — label ini ada di `x-main-labels`, jadi server baru otomatis dapat. Kalau log Prometheus berisi `permission denied ... docker.sock`, pastikan mount socket read-only dan `user: "0:0"` masih ada, lalu recreate Prometheus. |
-| Panel sebaran k6 kosong untuk semua server | Panel baru membaca metric `served` (tag `server`). Run lama memakai `served_server_N` dan tidak tampil. Jalankan Run baru lewat link "Run k6". |
+| Panel sebaran k6 kosong untuk semua server | Panel membaca metric `served` (tag `server`). Run lama memakai `served_server_N` dan tidak tampil. Jalankan Run baru lewat tautan "Run k6". |
 | Metrik `traefik_*` tidak ada di Prometheus | `metrics.prometheus` di `docker/traefik/traefik.yml` hanya dibaca saat start: `make traefik-down && make traefik-up`. Verifikasi: `curl http://127.0.0.1:8089/metrics \| Select-String traefik_entrypoint_requests_total`. |
 | `k6` di container gagal resolve `server.localhost` | Alias network hanya aktif kalau traefik dibuat ulang setelah `docker-compose.traefik.yml` diubah: `make traefik-down && make traefik-up`. Cek: `docker run --rm --network lb-net alpine:3 nslookup server.localhost`. |
 | `docker compose` gagal: `network lb-net declared as external, but could not be found` | Network belum dibuat: `make net-up`. |
