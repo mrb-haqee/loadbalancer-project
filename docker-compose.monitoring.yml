@@ -6,9 +6,15 @@ name: lb-k6
 # - `lb-k6-net` untuk InfluxDB ↔ Grafana ↔ k6 ↔ Prometheus (internal saja).
 # Jadi `docker compose -p lb-demo down` tidak ikut mematikan dashboard.
 #
-# Dua sumber data, dua dashboard:
+# Tiga sumber data, tiga dashboard:
 # - InfluxDB 1.8  → hasil test k6 (dashboard `k6-lb`)
 # - Prometheus    → trafik nyata dari Traefik + 5 backend (dashboard `lb-realtime`)
+# - Loki          → log error MariaDB + backend (dashboard `db-monitoring`)
+#
+# Kenapa exporter/Loki/Alloy ada di sini, bukan di stack database:
+# `lb-db` sengaja hanya berisi data (MariaDB + Adminer). Semua yang membaca
+# data tinggal di stack monitoring, jadi `npm run db:down` tidak mematikan
+# alat pantau, dan MariaDB tetap tidak punya port host maupun rute Traefik.
 
 services:
   # Prometheus menyimpan angka trafik nyata (Traefik + 5 backend).
@@ -33,6 +39,29 @@ services:
       - lb-net
     restart: unless-stopped
 
+  # Satu-satunya jembatan ke MariaDB untuk metrik server.
+  # - Di `lb-net` supaya bisa menjangkau `mariadb:3306`; MariaDB sendiri tetap
+  #   tanpa port host dan tanpa rute Traefik.
+  # - Di `lb-k6-net` supaya Prometheus (target statis `mysqld-exporter:9104`)
+  #   bisa men-scrape-nya. Tidak ada port yang dipublikasikan ke host.
+  # - User `lb_exporter` dibuat oleh `npm run db:grant-exporter`
+  #   (butuh PROCESS + REPLICATION CLIENT; `lb_app` tidak punya PROCESS).
+  # Kalau MariaDB mati, exporter bisa berhenti; `restart` membuatnya menyambung
+  # lagi sendiri begitu database hidup, tanpa perlu `docker compose up` ulang.
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.17.2
+    command:
+      - "--mysqld.address=mariadb:3306"
+      - "--mysqld.username=lb_exporter"
+      # Tanpa flag kolektor: metrik standar (global_status, global_variables,
+      # innodb_*, slave_*) sudah cukup untuk dashboard dan alert.
+    environment:
+      MYSQLD_EXPORTER_PASSWORD: ${MARIADB_EXPORTER_PASSWORD:-lb_exporter_password}
+    networks:
+      - lb-k6-net
+      - lb-net
+    restart: unless-stopped
+
   influxdb:
     image: influxdb:1.8
     environment:
@@ -49,6 +78,42 @@ services:
       timeout: 3s
       retries: 12
       start_period: 10s
+    restart: unless-stopped
+
+  # Loki: penyimpanan log container. Tanpa auth dan tanpa port host; hanya
+  # Grafana (datasource uid `loki`) yang membacanya. Retensi 7 hari.
+  loki:
+    image: grafana/loki:latest
+    command:
+      - "-config.file=/etc/loki/loki.yml"
+    volumes:
+      - ./monitoring/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    networks:
+      - lb-k6-net
+    restart: unless-stopped
+
+  # Alloy: pengirim log container berlabel `lb.logs=true` ke Loki.
+  # Membaca Docker API lewat socket (read-only), bukan file log host, karena
+  # Docker Desktop di Windows tidak membagikan /var/lib/docker/containers.
+  # Root hanya untuk membaca socket; tidak ada akses tulis ke Docker.
+  alloy:
+    image: grafana/alloy:latest
+    user: "0:0"
+    command:
+      - "run"
+      - "/etc/alloy/config.alloy"
+      - "--storage.path=/var/lib/alloy/data"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--disable-reporting"
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - lb-k6-net
+    depends_on:
+      - loki
     restart: unless-stopped
 
   grafana:
@@ -77,6 +142,8 @@ services:
     depends_on:
       influxdb:
         condition: service_healthy
+      loki:
+        condition: service_started
     networks:
       - lb-k6-net
       - lb-net
@@ -148,6 +215,8 @@ volumes:
   influxdb-data:
   grafana-data:
   prometheus-data:
+  loki-data:
+  alloy-data:
 
 networks:
   lb-k6-net:

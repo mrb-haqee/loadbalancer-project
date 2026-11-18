@@ -4,7 +4,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Load Balancer (LB)** — Pintu masuk tunggal yang membagi request klien ke beberapa Backend. Klien tidak pernah memilih Backend sendiri.
 
-**Backend** — Satu instance aplikasi yang melayani request. Di project ini ada tiga Backend, masing-masing satu container dengan identitas sendiri (`server-1`, `server-2`, `server-3`).
+**Backend** — Satu instance aplikasi yang melayani request. Di project ini ada lima Backend, masing-masing satu container dengan identitas sendiri (`server-1` … `server-5`).
 
 **Server (dalam konteks project ini)** — Sinonim Backend. Bukan mesin fisik terpisah.
 
@@ -54,7 +54,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **WRR (Weighted Round Robin)** — Algoritma default Traefik: round robin dengan bobot; pada project ini semua Server berbobot sama sehingga hasilnya bergiliran.
 
-**Project Compose** — Satu kesatuan container yang dikelola perintah `docker compose -p <nama>`. Project ini memakai tiga: `lb-traefik`, `lb-demo`, `lb-k6`; masing-masing bisa dinyalakan/dimatikan sendiri.
+**Project Compose** — Satu kesatuan container yang dikelola perintah `docker compose -p <nama>`. Project ini memakai empat: `lb-traefik`, `lb-demo`, `lb-db`, `lb-k6`; masing-masing bisa dinyalakan/dimatikan sendiri.
 
 **Network Bersama** — Network Docker yang dibuat di luar project-project compose dan dipakai sebagai *external*, sehingga container dari project berbeda bisa saling menjangkau tanpa satu project menjadi milik project lain.
 
@@ -86,7 +86,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Scrape** — Aksi Prometheus mengambil `/metrics` dari satu target secara berkala; di project ini tiap 2 detik (`scrape_interval: 2s`).
 
-**Target** — Satu alamat yang di-scrape Prometheus; di project ini 1 target Traefik + satu target per backend (ditemukan otomatis, bukan didaftar manual), terlihat dari metrik `up` (1 = hidup, 0 = mati).
+**Target** — Satu alamat yang di-scrape Prometheus; di project ini 1 target Traefik, satu target per backend (ditemukan otomatis, bukan didaftar manual), dan 1 target statis `mysqld-exporter` untuk MariaDB, terlihat dari metrik `up` (1 = hidup, 0 = mati).
 
 **Service Discovery (`docker_sd`)** — Cara Prometheus menemukan target sendiri dengan menanyakan Docker API, bukan dari daftar di `prometheus.yml`; dipakai untuk backend di project ini lewat socket read-only.
 
@@ -108,9 +108,11 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Grafana** — Aplikasi dashboard yang membaca InfluxDB dan Prometheus lalu menggambar panel; di project ini port 3000 dan `http://grafana.localhost`.
 
-**Dashboard Terprovisi (provisioned dashboard)** — Dashboard yang dibaca Grafana dari file saat start, bukan dibuat manual lewat UI; perubahan lewat UI tidak disimpan karena `allowUiUpdates: false`. Dua folder: `monitoring/grafana/dashboards/k6/k6.json` dan `.../lb/lb-realtime.json`.
+**Label Log (`lb.logs=true`)** — Label Docker pada container yang log-nya dikirim Alloy ke Loki; di project ini MariaDB dan semua backend. Container tanpa label ini tidak dikirim.
 
-**Datasource** — Koneksi Grafana ke sumber data; di project ini dua: `k6-influxdb` (uid `k6-influxdb`, default) dan `prometheus` (uid `prometheus`).
+**Dashboard Terprovisi (provisioned dashboard)** — Dashboard yang dibaca Grafana dari file saat start, bukan dibuat manual lewat UI; perubahan lewat UI tidak disimpan karena `allowUiUpdates: false`. Tiga folder: `monitoring/grafana/dashboards/k6/k6.json`, `.../lb/lb-realtime.json`, dan `.../db/database.json`.
+
+**Datasource** — Koneksi Grafana ke sumber data; di project ini tiga: `k6-influxdb` (uid `k6-influxdb`, default), `prometheus` (uid `prometheus`), dan `loki` (uid `loki`).
 
 **Web Dashboard k6** — Dashboard bawaan binary k6 yang tampil real-time selama test di port 5665 dan bisa diekspor jadi `report.html`; datanya hilang setelah test selesai, berbeda dari Grafana.
 
@@ -124,7 +126,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **CRUD** — Empat operasi dasar terhadap katalog: membuat, membaca, mengganti, dan menghapus satu Server Terdaftar.
 
-**Database Compose (`lb-db`)** — Project compose terpisah berisi MariaDB dan Adminer. Tidak dipublikasikan lewat Traefik; hanya MariaDB yang dijangkau backend lewat network `lb-net`.
+**Database Compose (`lb-db`)** — Project compose terpisah berisi MariaDB dan Adminer. MariaDB tidak dipublikasikan lewat Traefik (hanya dijangkau backend lewat `lb-net`); satu-satunya rute Traefik di stack ini adalah `adminer.localhost` untuk Adminer.
 
 **Pembaca Database (Adminer)** — Halaman web untuk membuka tabel dan isi MariaDB tanpa menulis query. Punya dua pintu: `adminer.localhost` lewat Traefik (router prioritas 200) dan `127.0.0.1:8081` sebagai cadangan loopback. Tanpa auth tambahan; hanya untuk lokal.
 
@@ -133,3 +135,25 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 **Pool Koneksi** — Kumpulan koneksi database yang dipakai ulang backend, bukan satu koneksi baru per request. Pool dibuat malas: backend tetap start dan tetap sehat walau MariaDB belum hidup.
 
 **Database Tidak Tersedia (503)** — Keadaan saat endpoint CRUD tidak bisa menjangkau MariaDB. Backend tetap sehat dan endpoint demo tetap bekerja; hanya operasi katalog yang gagal.
+
+## Istilah monitoring database
+
+**Exporter (`mysqld-exporter`)** — Service kecil yang login ke MariaDB lalu menerjemahkan `SHOW GLOBAL STATUS` dan `SHOW GLOBAL VARIABLES` menjadi metrik Prometheus (`mysql_*`). Di project ini hidup di `lb-k6`, tanpa port host.
+
+**User Exporter (`lb_exporter`)** — User MariaDB khusus untuk exporter, dengan hak `PROCESS` dan `REPLICATION CLIENT`. Dibuat idempotent oleh `npm run db:grant-exporter`; bukan user aplikasi (`lb_app`) dan tidak dipakai backend.
+
+**Metrik DB Aplikasi (`lb_db_*`)** — Metrik query database yang dihitung backend sendiri dan diekspor di `/metrics`: jumlah query per operasi, jumlah error per kode driver, dan histogram durasi. Tetap ada saat exporter ikut buta karena database mati.
+
+**Metrik `mysql_up`** — 1 bila exporter berhasil login dan membaca status MariaDB, 0 bila gagal. Berbeda dari `up{job="mariadb"}` yang menunjukkan apakah Prometheus berhasil menembak exporter.
+
+**Loki** — Penyimpanan log terpusat bergaya Prometheus: log diberi label, dibaca dengan LogQL, dan disimpan 7 hari. Di project ini tanpa auth dan tanpa port host.
+
+**Alloy** — Agen pengumpul log Grafana. Di project ini membaca log container lewat Docker API (socket read-only) dan hanya mengirim container berlabel `lb.logs=true` ke Loki.
+
+**LogQL** — Bahasa query Loki, mis. `{project="lb-db"} |= "error"`. Mirip PromQL, tetapi untuk baris log.
+
+**Alert Rule** — Aturan di Grafana yang mengevaluasi query Prometheus secara berkala dan berpindah keadaan `inactive → pending → firing`. Empat rule database ada di `monitoring/grafana/provisioning/alerting/rules.yml`.
+
+**Contact Point** — Tujuan notifikasi alert (email, Telegram, webhook). Di project ini belum ada, jadi alert hanya terlihat di Grafana; menambahkannya tidak mengubah arsitektur.
+
+**Retensi** — Lama data disimpan sebelum dibuang: 7 hari untuk Prometheus dan Loki di project ini.

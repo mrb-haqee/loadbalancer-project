@@ -1,0 +1,227 @@
+apiVersion: 1
+
+# Alert rule Grafana (bukan Prometheus/Alertmanager) supaya tidak menambah
+# container dan status firing langsung terlihat di Grafana.
+#
+# Belum ada contact point keluar (email/Telegram/webhook). Alert tetap
+# dihitung dan tampil di menu Alerting serta panel "Alert list". Cara
+# menambah notifikasi ada di docs/database-monitoring.md.
+
+groups:
+  - orgId: 1
+    name: database
+    folder: Database
+    interval: 1m
+    rules:
+      - uid: mariadb-down
+        title: MariaDB tidak terjangkau
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: up{job="mariadb"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 30s
+        annotations:
+          summary: MariaDB mati atau tidak bisa di-scrape
+          description: >
+            `up{job="mariadb"}` bernilai 0 atau tidak ada data selama 30 detik.
+            Cek `npm run db:ps`, `docker logs lb-db-mariadb-1`, dan kredensial
+            user `lb_exporter` (`npm run db:grant-exporter`).
+        labels:
+          severity: critical
+          component: database
+        isPaused: false
+
+      - uid: mariadb-connections-high
+        title: Koneksi MariaDB hampir penuh
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: mysql_global_status_threads_connected / mysql_global_variables_max_connections
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0.8]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Pemakaian koneksi MariaDB di atas 80%
+          description: >
+            `threads_connected / max_connections > 0.8`. Periksa query yang
+            menggantung di Adminer atau naikkan `max_connections`.
+        labels:
+          severity: warning
+          component: database
+        isPaused: false
+
+      - uid: mariadb-slow-queries
+        title: Slow query MariaDB menumpuk
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: increase(mysql_global_status_slow_queries[5m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Lebih dari 5 slow query dalam 5 menit
+          description: >
+            `slow_queries` naik cepat. Catatan: slow query log belum diaktifkan;
+            angka ini dari status server. Periksa query lewat Adminer.
+        labels:
+          severity: warning
+          component: database
+        isPaused: false
+
+      - uid: api-db-errors
+        title: Backend gagal mengakses database
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: sum(rate(lb_db_errors_total{code!="ER_DUP_ENTRY"}[2m])) or vector(0)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Query database dari backend mulai gagal
+          description: >
+            Ada `lb_db_errors_total` dengan kode selain `ER_DUP_ENTRY`.
+            Cek log backend (`{project="lb-demo"}`) dan status MariaDB.
+        labels:
+          severity: warning
+          component: database
+        isPaused: false

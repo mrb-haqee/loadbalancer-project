@@ -1,6 +1,6 @@
 # Load Balancer — 5 Server (Traefik + Docker)
 
-Load balancer yang membagi trafik ke **5 backend server** memakai **Traefik 3.6** di Docker, dengan **URL sendiri untuk tiap server**, dashboard, test suite, skenario uji beban k6, dan **CRUD katalog server di MariaDB**.
+Load balancer yang membagi trafik ke **5 backend server** memakai **Traefik 3.6** di Docker, dengan **URL sendiri untuk tiap server**, dashboard, test suite, skenario uji beban k6, **CRUD katalog server di MariaDB**, dan **monitoring database** (metrik, dashboard, alert, log error).
 
 Semua dibuat dari nol di folder ini. **Tidak menyentuh project yang sudah ada**: project compose sendiri, network sendiri (`lb-net`), port sendiri (80/8088/8089). Jadi `proxy`, `sanmedclinic_internal`, `shared-api`, dan container lama `traefik-traefik-1` tidak tersentuh.
 
@@ -11,9 +11,9 @@ Empat project compose terpisah, semuanya berbagi network `lb-net`:
 | `lb-traefik` | `docker-compose.traefik.yml` | Traefik saja — pintu masuk semua URL |
 | `lb-demo` | `docker-compose.yml` | 5 backend (`server-1` … `server-5`) |
 | `lb-db` | `docker-compose.db.yml` | MariaDB 11.4 + Adminer |
-| `lb-k6` | `docker-compose.monitoring.yml` | k6, InfluxDB, Grafana, Prometheus |
+| `lb-k6` | `docker-compose.monitoring.yml` | k6, InfluxDB, Grafana, Prometheus, exporter MariaDB, Loki + Alloy |
 
-Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diberi label dan menempel di `lb-net` otomatis dapat URL. Grafana dan web dashboard k6 karena itu bisa dibuka lewat `grafana.localhost` dan `k6.localhost`, bukan hanya lewat port.
+Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diberi label dan menempel di `lb-net` otomatis dapat URL. Grafana dan web dashboard k6 karena itu bisa dibuka lewat `grafana.localhost` dan `k6.localhost`, bukan hanya lewat port. MariaDB dan exporter-nya tetap tanpa rute Traefik: yang dibuka hanya dashboard-nya.
 
 > Sebelumnya ada varian load balancer yang ditulis sendiri di Node.js. Varian itu **sudah dihapus** dari project ini karena yang dipakai hanya versi container. Catatan sejarahnya tetap ada di [`docs/adr/`](docs/adr/).
 
@@ -30,7 +30,8 @@ Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diber
 | `http://server-5.localhost/` | Langsung ke `server-5` |
 | `http://server-N.localhost/ui` | UI yang sama, selalu dilayani `server-N` |
 | `http://adminer.localhost/` | **Adminer** — pembaca isi database MariaDB (lewat Traefik) |
-| `http://grafana.localhost/` | **Grafana** — dashboard hasil k6 **dan** dashboard realtime trafik |
+| `http://grafana.localhost/` | **Grafana** — dashboard hasil k6, realtime trafik, dan **database MariaDB** |
+| `http://grafana.localhost/d/db-monitoring` | **Dashboard database** — status, koneksi, query, error, dan log |
 | `http://traefik.localhost/dashboard/` | Dashboard Traefik (routers, services, status tiap server) |
 | `http://k6.localhost/` | Web dashboard k6 — **hanya saat `npm run k6:watch`** |
 | `http://127.0.0.1:8081/` | Cadangan: Adminer lewat port loopback, tetap jalan walau Traefik mati |
@@ -55,10 +56,12 @@ Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diber
                                ┌───────────────────────────┐
                                │ Grafana · InfluxDB        │
                                │ Prometheus · k6-runner    │
+                               │ mysqld-exporter · Loki    │
+                               │ Alloy                     │
                                └───────────────────────────┘
 ```
 
-12 container: 1 Traefik, 5 backend, MariaDB + Adminer, serta Grafana + InfluxDB + Prometheus + k6-runner. Network `lb-net` dibuat **di luar compose** (`npm run net:up`) dan dipakai bersama; masing-masing project bisa naik/turun sendiri.
+15 container: 1 Traefik, 5 backend, MariaDB + Adminer, serta Grafana + InfluxDB + Prometheus + k6-runner + mysqld-exporter + Loki + Alloy. Network `lb-net` dibuat **di luar compose** (`npm run net:up`) dan dipakai bersama; masing-masing project bisa naik/turun sendiri.
 
 ## 2. Struktur project
 
@@ -70,7 +73,7 @@ loadBalancer/
 ├── docker-compose.traefik.yml    # Traefik saja (project lb-traefik, network lb-net external)
 ├── docker-compose.yml            # 5 backend server (project lb-demo)
 ├── docker-compose.db.yml         # MariaDB + Adminer (project lb-db)
-├── docker-compose.monitoring.yml # k6 + InfluxDB + Grafana + Prometheus (project lb-k6)
+├── docker-compose.monitoring.yml # k6 + InfluxDB + Grafana + Prometheus + exporter + Loki/Alloy (project lb-k6)
 ├── db/init/001-schema.sql        # skema registered_servers + seed 5 server
 ├── docker/
 │   ├── backend.Dockerfile        # image backend (Node 22 alpine + mysql2 + HEALTHCHECK)
@@ -79,6 +82,7 @@ loadBalancer/
 │   ├── backend/server.js         # aplikasi backend (dijalankan 5x, beda BACKEND_ID)
 │   ├── backend/http.js           # helper respons JSON/HTML + pembatas body
 │   ├── backend/db.js             # pool koneksi mysql2 (lazy, timeout 1 detik)
+│   ├── backend/db-metrics.js     # metrik query DB yang diekspor lewat /metrics
 │   ├── backend/servers/          # validasi, repository, dan route /api/servers
 │   ├── backend/public/index.html # UI CRUD katalog di /ui
 │   └── shared/                   # loader config.json + logger
@@ -89,6 +93,7 @@ loadBalancer/
 │       └── lb-docker.test.js        # smoke, URL per server, distribusi, beban, failover
 ├── scripts/
 │   ├── network.js                # buat network lb-net sekali (idempotent)
+│   ├── db-grant-exporter.js      # buat/segarkan user monitoring lb_exporter
 │   ├── install-k6.js             # unduh binary k6 resmi lewat Bun → tools/k6/
 │   └── k6.js                     # pembungkus k6 (Windows/Linux/macOS)
 ├── k6/
@@ -96,14 +101,18 @@ loadBalancer/
 │   ├── failover.js               # skenario failover (sambil server dimatikan)
 │   └── lib/backend-counters.js   # counter per server agar sebaran terlihat
 ├── monitoring/
-│   ├── prometheus/prometheus.yml # scrape Traefik + backend tiap 2 detik
-│   ├── grafana/provisioning/     # datasource InfluxDB + Prometheus, provider dashboard
+│   ├── prometheus/prometheus.yml # scrape Traefik + backend tiap 2 detik + exporter MariaDB
+│   ├── loki/loki.yml             # penyimpanan log, retensi 7 hari
+│   ├── alloy/config.alloy        # kirim log container berlabel lb.logs=true ke Loki
+│   ├── grafana/provisioning/     # datasource InfluxDB/Prometheus/Loki, provider dashboard, alert
 │   ├── grafana/dashboards/k6/    # k6.json (hasil test)
 │   ├── grafana/dashboards/lb/    # lb-realtime.json (trafik nyata)
+│   ├── grafana/dashboards/db/    # database.json (MariaDB + log)
 │   └── reports/                  # hasil ekspor report.html dari k6 web dashboard
 ├── GLOSSARY.md
 └── docs/
     ├── database-crud.md          # panduan database, API, dan UI CRUD
+    ├── database-monitoring.md    # metrik, dashboard, alert, dan log database
     └── adr/                      # catatan keputusan desain
 ```
 
@@ -121,11 +130,12 @@ Per project, kalau hanya butuh sebagian atau sedang debug:
 | Perintah | Arti |
 |---|---|
 | `npm run net:up` | Buat network bersama `lb-net` sekali (aman diulang) |
-| `npm run db:up` / `db:down` | MariaDB + Adminer (project `lb-db`) |
-| `npm run db:reset` | Hapus volume DB, buat ulang skema + seed |
+| `npm run db:up` / `db:down` | MariaDB + Adminer (project `lb-db`); `db:up` juga menyegarkan user exporter |
+| `npm run db:reset` | Hapus volume DB, buat ulang skema + seed, lalu grant ulang user exporter |
+| `npm run db:grant-exporter` | Buat/segarkan user `lb_exporter` tanpa menyentuh data |
 | `npm run traefik:up` / `traefik:down` | Traefik saja (project `lb-traefik`) |
 | `npm run docker:up` / `docker:down` | 5 backend saja (project `lb-demo`) |
-| `npm run k6:up` / `k6:down` | InfluxDB + Grafana + Prometheus (project `lb-k6`) |
+| `npm run k6:up` / `k6:down` | Grafana + InfluxDB + Prometheus + exporter + Loki + Alloy (project `lb-k6`) |
 | `npm run traefik:logs` | Access log Traefik (siapa melayani apa) |
 | `npm run docker:ps` | Status + health container backend |
 | `npm run docker:logs` | Log 5 backend server |
@@ -150,6 +160,7 @@ curl.exe -s -o NUL -w "%{http_code}`n" http://adminer.localhost/
 
 # dashboard lain lewat Traefik, bukan port
 curl.exe -s -o NUL -w "%{http_code}`n" http://grafana.localhost/login
+curl.exe -s -o NUL -w "%{http_code}`n" http://grafana.localhost/d/db-monitoring
 curl.exe -s -o NUL -w "%{http_code}`n" http://traefik.localhost/dashboard/
 ```
 
@@ -200,7 +211,7 @@ Dashboard lain memakai pola yang sama, hanya beda host dan port:
 
 ```bash
 npm test          # sama dengan npm run test:docker (butuh Docker)
-npm run test:backend  # unit test validasi CRUD, tanpa Docker/DB
+npm run test:backend  # unit test validasi CRUD + metrik DB, tanpa Docker/DB
 ```
 
 ```
@@ -263,12 +274,13 @@ Cara membaca angka failover itu:
 
 Semua ada di `docker-compose.monitoring.yml` dengan project sendiri (`lb-k6`), jadi tidak mengganggu stack `lb-demo` maupun `npm test`. Grafana dan k6 ikut menempel di `lb-net`, jadi keduanya juga punya URL lewat Traefik.
 
-Ada **dua sumber data** dengan arti berbeda:
+Ada **tiga sumber data** dengan arti berbeda:
 
 | Sumber | Isi | Dashboard |
 |---|---|---|
 | InfluxDB 1.8 | hasil **test k6** (hanya terisi saat `k6:run` / `k6:watch`) | `k6-lb` |
 | Prometheus | **trafik nyata** Traefik + semua backend (ditemukan otomatis lewat Docker), scrape tiap 2 detik | `lb-realtime` |
+| Prometheus + Loki | **kesehatan MariaDB**: status, koneksi, slow query, error CRUD, dan log container | `db-monitoring` |
 
 ```
 k6 (container) ──HTTP──> traefik:80 (server.localhost)
@@ -276,24 +288,27 @@ k6 (container) ──HTTP──> traefik:80 (server.localhost)
       └── output influxdb ──> influxdb:8086 (db `k6`) ──┐
                                                           ├──> grafana:3000
 traefik:8080/metrics + server-N:3000/metrics              │
-      └── scrape 2s ──> prometheus:9090 ──────────────────┘
+      └── scrape 2s ──> prometheus:9090 ──────────────────┤
+mariadb:3306 ──> mysqld-exporter:9104 ── scrape ──────────┤
+container (lb.logs=true) ──> alloy ──> loki:3100 ─────────┘
 ```
 
 | URL | Arti |
 |---|---|
-| `http://grafana.localhost/` | **Grafana** (admin/admin, viewer anonim aktif). Dua dashboard: folder `k6` → `k6-lb`, folder `load-balancer` → `lb-realtime` |
+| `http://grafana.localhost/` | **Grafana** (admin/admin, viewer anonim aktif). Tiga dashboard: folder `k6` → `k6-lb`, folder `load-balancer` → `lb-realtime`, folder `database` → `db-monitoring` |
 | `http://grafana.localhost/d/lb-realtime` | Langsung ke dashboard realtime |
 | `http://grafana.localhost/d/k6-lb` | Langsung ke dashboard hasil k6 |
+| `http://grafana.localhost/d/db-monitoring` | Langsung ke dashboard database + log error |
 | `http://127.0.0.1:3000` | Cadangan: Grafana lewat port |
 | `http://k6.localhost/` | Web dashboard bawaan k6, **hanya hidup saat `npm run k6:watch`** |
 | `http://127.0.0.1:5665` | Cadangan: web dashboard k6 lewat port |
 | `http://trigger.localhost/cgi-bin/trigger` | Pemicu Run k6 dari browser (dipakai link "Run k6" di dashboard) |
 
-InfluxDB dan Prometheus **tidak** diekspos ke host maupun lewat Traefik. InfluxDB tidak punya UI; Prometheus hanya dikonsumsi Grafana.
+InfluxDB dan Prometheus **tidak** diekspos ke host maupun lewat Traefik. InfluxDB tidak punya UI; Prometheus hanya dikonsumsi Grafana. Loki, Alloy, dan `mysqld-exporter` juga tanpa port host.
 
 | Perintah | Arti |
 |---|---|
-| `npm run k6:up` | Nyalakan InfluxDB + Grafana + Prometheus + runner pemicu (image diunduh/di-build sekali) |
+| `npm run k6:up` | Nyalakan InfluxDB + Grafana + Prometheus + k6-runner + exporter MariaDB + Loki + Alloy (image diunduh/di-build sekali) |
 | `npm run k6:run` | Jalankan k6 sekali di container, hasil masuk InfluxDB + Grafana |
 | `npm run k6:watch` | Sama, tapi dashboard web k6 hidup di `http://k6.localhost` / `http://127.0.0.1:5665` dan hasilnya diekspor ke `monitoring/reports/report.html` |
 | `npm run k6:down` | Matikan stack monitoring (data di volume tetap) |
@@ -345,7 +360,7 @@ Panel (12):
 
 Selisih "masuk" dan "diterima" itu normal dan bukan bug: health check Traefik (`/health`) tidak dihitung backend, sementara `/metrics` dan `/health` sengaja dikecualikan dari counter backend agar angkanya tidak tercemar probe 2 detik.
 
-Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/server.js`), berisi counter `lb_backend_requests_total`, `lb_backend_slow_requests_total`, dan histogram `lb_backend_request_duration_seconds`. Bisa dicek langsung:
+Endpoint `/metrics` backend adalah teks polos tanpa dependency (`src/backend/server.js`), berisi counter `lb_backend_requests_total`, `lb_backend_slow_requests_total`, histogram `lb_backend_request_duration_seconds`, serta metrik query database `lb_db_*` (lihat bagian 7c). Bisa dicek langsung:
 
 ```bash
 curl http://server-1.localhost/metrics
@@ -397,6 +412,34 @@ Kenapa begini:
 
 Alternatif tanpa Grafana tetap ada: `npm run k6:run` (sekali) dan `npm run k6:watch` (plus web dashboard k6 + `report.html`).
 
+### 7c. Monitoring database MariaDB
+
+Database tidak hanya bisa dibaca isinya lewat Adminer — kesehatannya juga dipantau. Semua alat tinggal di `lb-k6`, jadi `lb-db` tetap hanya berisi MariaDB + Adminer.
+
+```
+mariadb:3306 ──> mysqld-exporter:9104 ──scrape──> Prometheus ──> Grafana (db-monitoring)
+mariadb + backend (label lb.logs=true) ──> Alloy ──> Loki ─────> Grafana (panel log)
+backend /metrics (lb_db_*) ──────────────────────> Prometheus ──> Grafana + alert
+```
+
+| URL | Arti |
+|---|---|
+| `http://grafana.localhost/d/db-monitoring` | Dashboard database: status, koneksi, query/detik, slow query, buffer pool, latensi CRUD, error per kode, log |
+| `http://grafana.localhost/alerting/list` | Alert rule `database` (firing/pending/no data) |
+
+| Sumber | Metrik | Arti |
+|---|---|---|
+| `mysqld-exporter` | `mysql_up`, `mysql_global_status_*`, `mysql_global_variables_max_connections` | isi server MariaDB (butuh user `lb_exporter` dengan `PROCESS`) |
+| backend `/metrics` | `lb_db_queries_total`, `lb_db_errors_total`, `lb_db_query_duration_seconds` | query CRUD dari sisi aplikasi, kode error driver, latensi |
+| Prometheus | `up{job="mariadb"}` | target exporter hidup (0 = DB/exporter bermasalah) |
+| Loki | log `{project="lb-db"}` dan `{project="lb-demo"}` | error/warning asli dari container, bukan tebakan |
+
+Empat alert Grafana (provisioning, tanpa Alertmanager): `mariadb-down` (critical, 30s), `mariadb-connections-high`, `mariadb-slow-queries`, `api-db-errors`. Belum ada contact point keluar — statusnya dilihat di Grafana. Cara menambah email/Telegram ada di panduan.
+
+`npm run db:up` dan `db:reset` otomatis menjalankan `npm run db:grant-exporter`, jadi volume database lama tidak perlu dihapus untuk mengaktifkan monitoring.
+
+Panduan lengkap (metrik, LogQL, alert, uji gangguan, troubleshooting) ada di [`docs/database-monitoring.md`](docs/database-monitoring.md); keputusan desainnya di [`docs/adr/0010-monitoring-database.md`](docs/adr/0010-monitoring-database.md).
+
 ## 8. Database MariaDB + CRUD katalog server
 
 Database berada di **project compose sendiri** (`lb-db`, file `docker-compose.db.yml`), jadi bisa naik/turun tanpa menyentuh Traefik, backend, atau monitoring. Adminer punya rute Traefik sendiri (`adminer.localhost`, prioritas 200), tetapi stack DB **tidak bergantung** pada Traefik: port loopback `127.0.0.1:8081` tetap tersedia.
@@ -407,6 +450,7 @@ Database berada di **project compose sendiri** (`lb-db`, file `docker-compose.db
 | Adminer | `lb-db` | `http://adminer.localhost` (lewat Traefik) · cadangan `http://127.0.0.1:8081` |
 | UI CRUD | `lb-demo` | `http://server.localhost/ui` (atau `server-N.localhost/ui`) |
 | API CRUD | `lb-demo` | `http://server.localhost/api/servers` |
+| Monitoring DB | `lb-k6` | `http://grafana.localhost/d/db-monitoring` (exporter, alert, log Loki) |
 
 ```bash
 npm run db:up      # MariaDB + Adminer
@@ -436,7 +480,7 @@ Tiga hal yang sengaja begitu:
 - **`/health` tidak mengecek DB.** Kalau MariaDB mati, semua backend tetap sehat dan endpoint demo tetap jalan; hanya CRUD yang membalas 503. `connectTimeout` driver 1 detik membuat klien menerima 503 sebelum `responseHeaderTimeout` Traefik (2 detik) berubah jadi 504.
 - **State dibagi bersama.** Semua replika memakai satu database: tulis lewat `server.localhost`, baca lewat `server-3.localhost`, datanya sama. Header `x-served-by` di setiap respons menunjukkan backend yang melayani.
 
-Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`docs/database-crud.md`](docs/database-crud.md).
+Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`docs/database-crud.md`](docs/database-crud.md). Cara memantau kesehatan database dan membaca log error ada di [`docs/database-monitoring.md`](docs/database-monitoring.md).
 
 ## 9. Angka terukur (bukan asumsi)
 
@@ -461,6 +505,13 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | MariaDB dimatikan saat CRUD | **503** `DATABASE_UNAVAILABLE` dalam **1,1 detik** lewat Traefik; `/health` tetap **200**; GET kembali **200** setelah DB hidup |
 | Adminer | `http://adminer.localhost` → **200** (login `lb_app` melihat tabel `registered_servers`); cadangan `127.0.0.1:8081` → **200**; MariaDB sendiri tidak punya port host |
 | Validasi & konflik | port 0 → **400** + `details`; nama `server-1` duplikat → **409**; id tak ada → **404**; PATCH koleksi → **405** + `Allow` |
+| Exporter MariaDB | target `mariadb` `up=1`; `mysql_up=1`; `mysql_global_status_queries` dan `max_connections` terisi; tanpa port host |
+| Metrik DB backend | `curl server-1.localhost/metrics` memuat `lb_db_queries_total{operation="list",result="success"}`, histogram durasi, dan `lb_db_errors_total{code="ER_DUP_ENTRY"}` setelah POST duplikat |
+| Dashboard database | `db-monitoring` terprovisi (13 panel, folder `Database`), datasource `loki` ada, 4 alert rule termuat |
+| Log error terpusat | baris `CRUD ditolak: nama server duplikat` dari `lb-demo-server-1-1` muncul di Loki < 10 detik; log `Version: '11.4.13-MariaDB'` dari `lb-db-mariadb-1` juga masuk |
+| MariaDB dimatikan | `up{job="mariadb"}` → **0**; CRUD **503** `DATABASE_UNAVAILABLE` (kode driver `ETIMEDOUT` tercatat); `/` dan `/health` tetap **200** |
+| Alert saat DB mati | `mariadb-down` → **firing** setelah ±90 detik (evaluasi 1m + `for` 30s), `health: ok` |
+| DB dihidupkan lagi | `mysql_up` → **1**, CRUD **200**, tanpa restart backend; `db:grant-exporter` idempotent |
 
 ## 10. Batasan (sengaja, karena ini project demo/pembelajaran)
 
@@ -476,9 +527,13 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - `docker.sock` di-mount read-only, tapi tetap memberi akses ke Docker API — hanya untuk demo lokal, jangan diekspos ke internet.
 - Dashboard `api.insecure=true` tanpa login di port 8089 **dan** di `http://traefik.localhost/dashboard/`. Endpoint `/metrics` Traefik juga ikut terbuka di sana (port 8080 tidak dipublikasikan, tapi 8089 memuat API yang sama).
 - Grafana memakai kredensial default `admin/admin` dan viewer anonim; InfluxDB tanpa autentikasi dan tidak dipublikasikan ke host. Hanya untuk lokal.
-- Prometheus tanpa autentikasi dan tanpa port publik — hanya bisa diakses dari network `lb-net` / `lb-k6-net`. Retensi 7 hari.
-- Data monitoring disimpan di volume Docker (`influxdb-data`, `prometheus-data`); `npm run k6:down` tidak menghapusnya, `... down -v` menghapusnya.
-- Metrik backend disimpan di memori proses: counter kembali 0 setiap container backend dibuat ulang, dan Prometheus ikut melihatnya sebagai reset (rate tetap benar, angka total tidak).
+- Prometheus tanpa autentikasi dan tanpa port publik — hanya bisa diakses dari network `lb-net` / `lb-k6-net`. Retensi 7 hari. Loki juga tanpa auth, tanpa port host, retensi 7 hari.
+- User `lb_exporter` memakai password demo (`lb_exporter_password`) dan punya `PROCESS` + `REPLICATION CLIENT` pada semua database. Ganti lewat `MARIADB_EXPORTER_PASSWORD` + `npm run db:grant-exporter` bila perlu.
+- Alert database dikelola Grafana dan **belum punya contact point**: status firing hanya terlihat di Grafana, tidak ada email/Telegram/webhook. Slow query log MariaDB juga belum diaktifkan, jadi `slow_queries` adalah status server.
+- Loki menyimpan **semua** baris log container yang diberi label `lb.logs=true` (MariaDB + backend), bukan hanya error. Retensi 7 hari membatasi pertumbuhan.
+- Grafana hanya membaca ulang datasource/dashboard/alert provisioning saat start, dan Prometheus tidak memuat ulang `prometheus.yml` otomatis. Setelah mengubah file itu: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana` dan/atau `docker restart lb-k6-prometheus-1`.
+- Data monitoring disimpan di volume Docker (`influxdb-data`, `prometheus-data`, `loki-data`, `alloy-data`, `grafana-data`); `npm run k6:down` tidak menghapusnya, `... down -v` menghapusnya.
+- Metrik backend disimpan di memori proses: counter kembali 0 setiap container backend dibuat ulang, dan Prometheus ikut melihatnya sebagai reset (rate tetap benar, angka total tidak). Ini termasuk `lb_db_*`.
 - Scrape 2 detik berarti puncak trafik yang lebih pendek dari 2 detik bisa terlewat. Ini kompromi "cukup realtime" vs beban scrape.
 - Pemicu `trigger.localhost` tanpa autentikasi dan hanya menjaga single-flight: siapa pun yang bisa membuka host itu (termasuk viewer anonim Grafana) bisa memulai Run. Parameter Run juga tetap, tidak bisa diubah dari UI.
 - Runner memegang binary k6 dan menjalankan tepat satu Run per klik; tidak ada antrean, tidak ada riwayat status selain tag `run` di InfluxDB dan `/tmp/k6-run.log` di dalam container.
@@ -488,7 +543,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - `npm test` hanya mematikan `lb-demo`; Traefik dibiarkan hidup. Kalau ingin benar-benar bersih, jalankan `npm run stack:down`.
 - Network `lb-net` dibuat di luar compose, jadi `docker network prune` bisa menghapusnya saat semua container mati; pulihkan dengan `npm run net:up`.
 
-Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah teknis di [`GLOSSARY.md`](GLOSSARY.md), panduan database/CRUD di [`docs/database-crud.md`](docs/database-crud.md), dan cara menambah server baru di [`docs/menambah-server.md`](docs/menambah-server.md).
+Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah teknis di [`GLOSSARY.md`](GLOSSARY.md), panduan database/CRUD di [`docs/database-crud.md`](docs/database-crud.md), panduan monitoring database di [`docs/database-monitoring.md`](docs/database-monitoring.md), dan cara menambah server baru di [`docs/menambah-server.md`](docs/menambah-server.md).
 
 ## 11. Troubleshooting
 
@@ -528,4 +583,11 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | `bind: address already in use` saat `db:up` | Port 8081 dipakai proses lain. Set `ADMINER_PORT=8082` di `.env`, lalu `npm run db:up`. |
 | Perubahan `db/init/001-schema.sql` tidak berefek | SQL init hanya jalan saat volume kosong: `npm run db:reset` (menghapus data katalog). |
 | `npm run db:down` lalu `db:up`, data hilang | Data tidak hilang oleh `down`; hanya `down -v` / `db:reset` yang menghapus volume `lb-db-data`. Pastikan tidak ada perintah `down -v` manual. |
+| Dashboard `db-monitoring` tidak muncul / datasource `loki` tidak ada | File provisioning baru hanya dibaca saat Grafana start: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`. Cek `http://grafana.localhost/api/datasources`. |
+| `up{job="mariadb"}` = 0 / `mysql_up` kosong | Exporter tidak bisa scrape atau login. Cek `docker logs lb-k6-mysqld-exporter-1`, jalankan `npm run db:grant-exporter`, pastikan `MARIADB_EXPORTER_PASSWORD` sama di `.env` dan compose. |
+| Target `mariadb` hilang dari Prometheus setelah edit config | `prometheus.yml` hanya dibaca saat start: `docker restart lb-k6-prometheus-1`, lalu cek `/api/v1/targets`. |
+| Panel log database kosong | Container tidak berlabel `lb.logs=true` (label ada di `x-main-labels` dan service `mariadb`; recreate dengan `npm run docker:up` / `npm run db:up`), atau Alloy/Loki mati: `docker logs lb-k6-alloy-1`. |
+| Alert `Backend gagal mengakses database` terus NoData | Query alert harus selalu punya nilai. Rule ini memakai `or vector(0)`; kalau menambah rule baru, pakai pola sama atau set `noDataState: OK`. |
+| Alert firing tetapi tidak ada email/Telegram | Memang belum ada contact point: Grafana → Alerting → Contact points, lalu arahkan notification policy grup `database`. |
+| `db:grant-exporter` gagal `Access denied for user 'root'` | `MARIADB_ROOT_PASSWORD` di `.env` beda dengan password volume lama. Pakai password yang benar; `db:reset` hanya pilihan terakhir karena menghapus data. |
 | `npm install` tidak perlu untuk menjalankan stack | Image backend sudah `npm ci`; `npm install` lokal hanya untuk menjalankan backend/unit test tanpa Docker. |

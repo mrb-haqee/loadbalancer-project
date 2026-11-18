@@ -33,9 +33,11 @@ function handleDatabaseError(res, headers, error) {
     return sendApiError(res, 400, error.code, error.message, undefined, headers);
   }
   if (error?.code === 'ER_DUP_ENTRY') {
+    log.warn('CRUD ditolak: nama server duplikat (ER_DUP_ENTRY).');
     return sendApiError(res, 409, 'DUPLICATE_NAME', 'Nama server sudah ada di katalog.', undefined, headers);
   }
   if (error?.code === 'ER_NO_SUCH_TABLE') {
+    log.warn('Tabel registered_servers belum ada (ER_NO_SUCH_TABLE).');
     return sendApiError(
       res,
       503,
@@ -46,6 +48,7 @@ function handleDatabaseError(res, headers, error) {
     );
   }
   if (CONNECTION_CODES.has(error?.code)) {
+    log.warn(`database tidak tersedia (${error.code}): ${error.message}`);
     return sendApiError(
       res,
       503,

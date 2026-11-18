@@ -17,6 +17,7 @@ dari label container di `docker-compose.yml`. Alasannya ada di
 | Adminer (pembaca database) | `lb-db` | `http://adminer.localhost` (lewat Traefik) · cadangan `http://127.0.0.1:8081` |
 | UI CRUD | `lb-demo` (dilayani semua backend) | `http://server.localhost/ui` |
 | API CRUD | `lb-demo` (dilayani semua backend) | `http://server.localhost/api/servers` |
+| Monitoring database | `lb-k6` | `http://grafana.localhost/d/db-monitoring` (metrik, alert, log) |
 
 MariaDB sengaja **tidak** dipublikasikan ke host dan **tidak** dirutekan lewat Traefik.
 Adminer punya dua pintu: `http://adminer.localhost` (router `adminer`, prioritas 200 —
@@ -46,6 +47,7 @@ npm run stack:down # k6:down -> docker:down -> traefik:down -> db:down
 | `npm run db:reset` | Hapus volume `lb-db-data`, buat ulang skema + seed |
 | `npm run db:logs` | Log MariaDB + Adminer |
 | `npm run db:ps` | Status + health container database |
+| `npm run db:grant-exporter` | Buat/segarkan user monitoring `lb_exporter` (tanpa mengubah data) |
 
 Urutan penting: `lb-net` harus ada sebelum `db:up` dan `docker:up`.
 
@@ -59,6 +61,7 @@ Nilai di bawah adalah **kredensial demo**, bukan rahasia produksi:
 | `MARIADB_USER` | `lb_app` |
 | `MARIADB_PASSWORD` | `lb_app_password` |
 | `MARIADB_ROOT_PASSWORD` | `lb_root_password` |
+| `MARIADB_EXPORTER_PASSWORD` | `lb_exporter_password` (user monitoring, bukan untuk aplikasi) |
 | `ADMINER_PORT` | `8081` |
 
 Ganti lewat `.env` di root project (contoh di `.env.example`). `.env` sudah masuk
@@ -164,6 +167,20 @@ Halaman ini statis dan disalin ke image backend; setelah mengubah
 `/` tetap mengembalikan JSON echo seperti sebelumnya — UI sengaja di path terpisah
 supaya test load balancing tidak berubah.
 
+## Monitoring
+
+Kesehatan database dipantau dari stack `lb-k6`, bukan dari `lb-db`:
+
+- `mysqld-exporter` membaca status MariaDB lewat user `lb_exporter`
+  (`PROCESS` + `REPLICATION CLIENT`) yang dibuat `npm run db:grant-exporter`.
+- Backend menambahkan metrik `lb_db_queries_total`, `lb_db_errors_total`, dan
+  `lb_db_query_duration_seconds` ke `/metrics`.
+- Log MariaDB dan backend dikirim Alloy ke Loki (label `lb.logs=true`).
+
+Dashboard: `http://grafana.localhost/d/db-monitoring`. Alert yang tersedia:
+`mariadb-down`, `mariadb-connections-high`, `mariadb-slow-queries`, `api-db-errors`.
+Panduan lengkap ada di [`database-monitoring.md`](database-monitoring.md).
+
 ## Verifikasi yang sudah dijalankan
 
 ```bash
@@ -179,6 +196,8 @@ curl -s -X POST ... (name server-1)                            # 409 DUPLICATE_N
 docker compose -p lb-db -f docker-compose.db.yml stop mariadb
 curl -s -o /dev/null -w '%{http_code}' http://server-1.localhost/api/servers   # 503 (1,1 detik)
 curl -s -o /dev/null -w '%{http_code}' http://server-1.localhost/health        # 200
+# sementara itu di Grafana: up{job="mariadb"} -> 0, lalu alert mariadb-down firing
+docker compose -p lb-db -f docker-compose.db.yml start mariadb && npm run db:grant-exporter
 
 # Adminer lewat Traefik dan lewat port cadangan
 curl -s -o /dev/null -w '%{http_code}' http://adminer.localhost/               # 200 (halaman login)
@@ -192,4 +211,5 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/                  #
 - Adminer tanpa auth tambahan. Lewat `adminer.localhost` ia ikut terbuka di port 80 dan bisa dijangkau mesin lain di LAN bila nama itu resolve; `127.0.0.1:8081` hanya loopback. Jangan diekspos ke internet.
 - Kredensial demo tersimpan sebagai default compose dan bisa dilihat di repo.
 - Katalog tidak mengubah rotasi Traefik dan tidak dibaca oleh Prometheus/k6.
+- Monitoring database hanya untuk lokal: Grafana/Loki tanpa auth tambahan, exporter memakai password demo, dan alert belum punya notifikasi keluar.
 - Satu instance MariaDB, tanpa replika/backup. `db:reset` menghapus data.

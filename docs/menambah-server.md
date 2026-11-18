@@ -23,6 +23,8 @@ Monitoring **tidak punya daftar server**:
   network `lb-net`), label `server` diambil dari nama service compose.
 - k6 mencatat sebaran di satu metric `served` dengan tag `server`; panel Grafana-nya satu
   query `GROUP BY "server"`.
+- Log backend baru otomatis ikut Loki karena label `lb.logs=true` ada di `x-main-labels`;
+  metrik `lb_db_*` juga otomatis muncul di `/metrics` tanpa konfigurasi tambahan.
 
 ## 1. `docker-compose.yml`
 

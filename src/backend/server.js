@@ -4,6 +4,7 @@ import http from 'node:http';
 import { loadConfig } from '../shared/config.js';
 import { createLogger } from '../shared/logger.js';
 import { closePool, databaseTarget } from './db.js';
+import { renderDbMetrics } from './db-metrics.js';
 import { readBody, sendApiError, sendHtml, sendJson } from './http.js';
 import { handleServersApi } from './servers/routes.js';
 
@@ -92,6 +93,7 @@ async function handleRequest(req, res) {
       ...histogram,
       `lb_backend_request_duration_seconds_sum{${labels}} ${durationSum}`,
       `lb_backend_request_duration_seconds_count{${labels}} ${durationCount}`,
+      renderDbMetrics(self.id),
       '',
     ].join('\n');
     res.writeHead(200, {

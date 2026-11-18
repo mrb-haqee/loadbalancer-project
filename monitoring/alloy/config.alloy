@@ -1,0 +1,57 @@
+// Grafana Alloy: mengirim log container berlabel `lb.logs=true` ke Loki.
+// Membaca log lewat Docker API (bukan file /var/lib/docker/containers), karena
+// Docker Desktop di Windows tidak membagikan path itu ke container.
+//
+// Label yang dipasang:
+// - project = nama project compose (lb-db, lb-demo, ...)
+// - service = nama service compose (mariadb, server-1, ...)
+// - container = nama container
+// Query termudah: {project="lb-db"} atau {service="mariadb"}.
+
+logging {
+  level = "warn"
+}
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "logs" {
+  targets = discovery.docker.containers.targets
+
+  // Hanya container yang sengaja diikutsertakan.
+  rule {
+    source_labels = ["__meta_docker_container_label_lb_logs"]
+    regex         = "true"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "project"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  // Docker memberi nama container dengan awalan "/".
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.logs.output
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

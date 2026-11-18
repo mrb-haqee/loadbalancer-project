@@ -29,6 +29,10 @@ services:
       - ./db/init:/docker-entrypoint-initdb.d:ro
     networks:
       - lb-net
+    # Satu-satunya alasan label ini ada: Alloy (stack lb-k6) hanya mengambil
+    # log container berlabel `lb.logs=true`, supaya Loki tidak penuh log asing.
+    labels:
+      lb.logs: "true"
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
