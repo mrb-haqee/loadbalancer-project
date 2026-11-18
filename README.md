@@ -33,7 +33,7 @@ Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diber
 | `http://grafana.localhost/` | **Grafana** — dashboard hasil k6, realtime trafik, dan **database MariaDB** |
 | `http://grafana.localhost/d/db-monitoring` | **Dashboard database** — status, koneksi, query, error, dan log |
 | `http://traefik.localhost/dashboard/` | Dashboard Traefik (routers, services, status tiap server) |
-| `http://k6.localhost/` | Web dashboard k6 — **hanya saat `npm run k6:watch`** |
+| `http://k6.localhost/` | Web dashboard k6 — **hanya saat `make k6-watch`** |
 | `http://127.0.0.1:8081/` | Cadangan: Adminer lewat port loopback, tetap jalan walau Traefik mati |
 | `http://127.0.0.1:8088/` | Cadangan: LB lewat port, kalau port 80 dipakai aplikasi lain |
 | `http://127.0.0.1:8089/dashboard/` | Cadangan: dashboard Traefik lewat port |
@@ -61,7 +61,7 @@ Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diber
                                └───────────────────────────┘
 ```
 
-15 container: 1 Traefik, 5 backend, MariaDB + Adminer, serta Grafana + InfluxDB + Prometheus + k6-runner + mysqld-exporter + Loki + Alloy. Network `lb-net` dibuat **di luar compose** (`npm run net:up`) dan dipakai bersama; masing-masing project bisa naik/turun sendiri.
+15 container: 1 Traefik, 5 backend, MariaDB + Adminer, serta Grafana + InfluxDB + Prometheus + k6-runner + mysqld-exporter + Loki + Alloy. Network `lb-net` dibuat **di luar compose** (`make net-up`) dan dipakai bersama; masing-masing project bisa naik/turun sendiri.
 
 ## 2. Struktur project
 
@@ -69,7 +69,8 @@ Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diber
 loadBalancer/
 ├── .env.example                  # contoh kredensial DB (salin ke .env bila perlu)
 ├── config.json                   # peta identitas backend (dipakai saat backend jalan tanpa env)
-├── package.json                  # script docker/db/traefik/test/k6/monitoring
+├── Makefile                      # semua perintah operasional: stack, db, traefik, test, k6
+├── package.json                  # metadata Node + dependency mysql2 (tanpa script)
 ├── docker-compose.traefik.yml    # Traefik saja (project lb-traefik, network lb-net external)
 ├── docker-compose.yml            # 5 backend server (project lb-demo)
 ├── docker-compose.db.yml         # MariaDB + Adminer (project lb-db)
@@ -118,28 +119,30 @@ loadBalancer/
 
 ## 3. Menjalankan
 
+Semua perintah operasional ada di `Makefile`. Butuh **GNU Make** (Windows: `choco install make` atau GnuWin32 Make; Linux: paket `make`; macOS: `xcode-select --install`). `make` tanpa argumen menampilkan daftar target.
+
 Cara normal — satu perintah untuk semuanya:
 
 ```bash
-npm run stack:up       # net:up → db:up → traefik:up → docker:up → k6:up
-npm run stack:down     # k6:down → docker:down → traefik:down → db:down
+make stack-up       # net-up → db-up → traefik-up → docker-up → k6-up
+make stack-down     # k6-down → docker-down → traefik-down → db-down
 ```
 
 Per project, kalau hanya butuh sebagian atau sedang debug:
 
 | Perintah | Arti |
 |---|---|
-| `npm run net:up` | Buat network bersama `lb-net` sekali (aman diulang) |
-| `npm run db:up` / `db:down` | MariaDB + Adminer (project `lb-db`); `db:up` juga menyegarkan user exporter |
-| `npm run db:reset` | Hapus volume DB, buat ulang skema + seed, lalu grant ulang user exporter |
-| `npm run db:grant-exporter` | Buat/segarkan user `lb_exporter` tanpa menyentuh data |
-| `npm run traefik:up` / `traefik:down` | Traefik saja (project `lb-traefik`) |
-| `npm run docker:up` / `docker:down` | 5 backend saja (project `lb-demo`) |
-| `npm run k6:up` / `k6:down` | Grafana + InfluxDB + Prometheus + exporter + Loki + Alloy (project `lb-k6`) |
-| `npm run traefik:logs` | Access log Traefik (siapa melayani apa) |
-| `npm run docker:ps` | Status + health container backend |
-| `npm run docker:logs` | Log 5 backend server |
-| `npm run db:logs` | Log MariaDB + Adminer |
+| `make net-up` | Buat network bersama `lb-net` sekali (aman diulang) |
+| `make db-up` / `db-down` | MariaDB + Adminer (project `lb-db`); `db-up` juga menyegarkan user exporter |
+| `make db-reset` | Hapus volume DB, buat ulang skema + seed, lalu grant ulang user exporter |
+| `make db-grant-exporter` | Buat/segarkan user `lb_exporter` tanpa menyentuh data |
+| `make traefik-up` / `traefik-down` | Traefik saja (project `lb-traefik`) |
+| `make docker-up` / `docker-down` | 5 backend saja (project `lb-demo`) |
+| `make k6-up` / `k6-down` | Grafana + InfluxDB + Prometheus + exporter + Loki + Alloy (project `lb-k6`) |
+| `make traefik-logs` | Access log Traefik (siapa melayani apa) |
+| `make docker-ps` | Status + health container backend |
+| `make docker-logs` | Log 5 backend server |
+| `make db-logs` | Log MariaDB + Adminer |
 
 Urutan penting: network **sebelum** database/traefik/backend. Saat mematikan, balik urutannya — `lb-net` tidak bisa dihapus selama masih ada container yang menempel.
 
@@ -192,7 +195,7 @@ Aturan backend ada di `docker-compose.yml` + `docker/traefik/traefik.yml`:
 - **Health check aktif**: label `...healthcheck.path=/health` (interval 2s) + `HEALTHCHECK` di `docker/backend.Dockerfile`. Container mati/unhealthy otomatis keluar dari rotasi.
 - **Failover pasif**: middleware `retry` 3× (`initialInterval 100ms`) mengulang request bila server tidak menjawab.
 - **Batas waktu backend** di `traefik.yml`: `responseHeaderTimeout: 2s`, `dialTimeout: 2s`. Tanpa ini, request yang telanjur dikirim ke container yang baru mati **menggantung tanpa batas** (Traefik default: tanpa timeout) walau retry tersedia.
-- Access log aktif, jadi setiap request tercatat di `npm run traefik:logs`.
+- Access log aktif, jadi setiap request tercatat di `make traefik-logs`.
 
 Dashboard lain memakai pola yang sama, hanya beda host dan port:
 
@@ -205,13 +208,13 @@ Dashboard lain memakai pola yang sama, hanya beda host dan port:
 
 **Kenapa prioritas 200?** Router `demo` sengaja menangkap *semua* host (`PathPrefix(/)`) supaya `http://127.0.0.1:8088` tetap berfungsi. Tanpa prioritas lebih tinggi, `grafana.localhost` atau `adminer.localhost` akan ikut dilempar ke backend. Prioritas 200 membuat router spesifik menang, dan aturan `demo` tidak perlu diubah setiap kali ada host baru.
 
-`k6.localhost` hanya hidup selama `npm run k6:watch` berjalan — begitu container k6 selesai, Traefik menghapus routernya (gejalanya 404, bukan halaman kosong). `adminer.localhost` hanya hidup selama stack `lb-db` berjalan; kalau Traefik mati, Adminer tetap bisa dibuka di `http://127.0.0.1:8081`.
+`k6.localhost` hanya hidup selama `make k6-watch` berjalan — begitu container k6 selesai, Traefik menghapus routernya (gejalanya 404, bukan halaman kosong). `adminer.localhost` hanya hidup selama stack `lb-db` berjalan; kalau Traefik mati, Adminer tetap bisa dibuka di `http://127.0.0.1:8081`.
 
 ## 5. Testing otomatis: apakah semuanya berjalan?
 
 ```bash
-npm test          # sama dengan npm run test:docker (butuh Docker)
-npm run test:backend  # unit test validasi CRUD + metrik DB, tanpa Docker/DB
+make test          # sama dengan make test-docker (butuh Docker)
+make test-backend  # unit test validasi CRUD + metrik DB, tanpa Docker/DB
 ```
 
 ```
@@ -233,14 +236,14 @@ Test tidak bergantung pada resolusi `*.localhost` milik OS (di sebagian Windows 
 k6 adalah binary Go, **bukan** paket JavaScript — `bun add k6` tidak bisa dipakai (paket npm bernama `k6` hanya dummy untuk autocomplete editor). Instalasinya tetap lewat Bun:
 
 ```bash
-npm run k6:install     # = bun scripts/install-k6.js → unduh rilis resmi ke tools/k6/k6.exe
-npm run k6             # cek versi
+make k6-install     # = bun scripts/install-k6.js → unduh rilis resmi ke tools/k6/k6.exe
+make k6               # cek versi
 ```
 
 | Perintah | Arti |
 |---|---|
-| `npm run k6:load` | 100 req/detik selama 15 detik ke `http://server.localhost` |
-| `npm run k6:failover` | 50 req/detik selama 40 detik, untuk diuji sambil mematikan server |
+| `make k6-load` | 100 req/detik selama 15 detik ke `http://server.localhost` |
+| `make k6-failover` | 50 req/detik selama 40 detik, untuk diuji sambil mematikan server |
 
 Ganti target atau intensitas (mis. port cadangan 8088):
 
@@ -272,13 +275,13 @@ Cara membaca angka failover itu:
 
 ## 7. Monitoring: k6, trafik nyata, dan Grafana
 
-Semua ada di `docker-compose.monitoring.yml` dengan project sendiri (`lb-k6`), jadi tidak mengganggu stack `lb-demo` maupun `npm test`. Grafana dan k6 ikut menempel di `lb-net`, jadi keduanya juga punya URL lewat Traefik.
+Semua ada di `docker-compose.monitoring.yml` dengan project sendiri (`lb-k6`), jadi tidak mengganggu stack `lb-demo` maupun `make test`. Grafana dan k6 ikut menempel di `lb-net`, jadi keduanya juga punya URL lewat Traefik.
 
 Ada **tiga sumber data** dengan arti berbeda:
 
 | Sumber | Isi | Dashboard |
 |---|---|---|
-| InfluxDB 1.8 | hasil **test k6** (hanya terisi saat `k6:run` / `k6:watch`) | `k6-lb` |
+| InfluxDB 1.8 | hasil **test k6** (hanya terisi saat `k6-run` / `k6-watch`) | `k6-lb` |
 | Prometheus | **trafik nyata** Traefik + semua backend (ditemukan otomatis lewat Docker), scrape tiap 2 detik | `lb-realtime` |
 | Prometheus + Loki | **kesehatan MariaDB**: status, koneksi, slow query, error CRUD, dan log container | `db-monitoring` |
 
@@ -300,7 +303,7 @@ container (lb.logs=true) ──> alloy ──> loki:3100 ───────�
 | `http://grafana.localhost/d/k6-lb` | Langsung ke dashboard hasil k6 |
 | `http://grafana.localhost/d/db-monitoring` | Langsung ke dashboard database + log error |
 | `http://127.0.0.1:3000` | Cadangan: Grafana lewat port |
-| `http://k6.localhost/` | Web dashboard bawaan k6, **hanya hidup saat `npm run k6:watch`** |
+| `http://k6.localhost/` | Web dashboard bawaan k6, **hanya hidup saat `make k6-watch`** |
 | `http://127.0.0.1:5665` | Cadangan: web dashboard k6 lewat port |
 | `http://trigger.localhost/cgi-bin/trigger` | Pemicu Run k6 dari browser (dipakai link "Run k6" di dashboard) |
 
@@ -308,20 +311,20 @@ InfluxDB dan Prometheus **tidak** diekspos ke host maupun lewat Traefik. InfluxD
 
 | Perintah | Arti |
 |---|---|
-| `npm run k6:up` | Nyalakan InfluxDB + Grafana + Prometheus + k6-runner + exporter MariaDB + Loki + Alloy (image diunduh/di-build sekali) |
-| `npm run k6:run` | Jalankan k6 sekali di container, hasil masuk InfluxDB + Grafana |
-| `npm run k6:watch` | Sama, tapi dashboard web k6 hidup di `http://k6.localhost` / `http://127.0.0.1:5665` dan hasilnya diekspor ke `monitoring/reports/report.html` |
-| `npm run k6:down` | Matikan stack monitoring (data di volume tetap) |
-| `npm run k6:logs` | Log InfluxDB/Grafana/k6 |
+| `make k6-up` | Nyalakan InfluxDB + Grafana + Prometheus + k6-runner + exporter MariaDB + Loki + Alloy (image diunduh/di-build sekali) |
+| `make k6-run` | Jalankan k6 sekali di container, hasil masuk InfluxDB + Grafana |
+| `make k6-watch` | Sama, tapi dashboard web k6 hidup di `http://k6.localhost` / `http://127.0.0.1:5665` dan hasilnya diekspor ke `monitoring/reports/report.html` |
+| `make k6-down` | Matikan stack monitoring (data di volume tetap) |
+| `make k6-logs` | Log InfluxDB/Grafana/k6 |
 
 Alur pemakaian:
 
 ```bash
-npm run stack:up       # network + traefik + backend + monitoring
-npm run k6:run         # k6 di container: 100 req/detik selama 15 detik
+make stack-up       # network + traefik + backend + monitoring
+make k6-run         # k6 di container: 100 req/detik selama 15 detik
 # buka http://grafana.localhost → folder k6 → dashboard k6-lb
 # buka http://grafana.localhost/d/lb-realtime kapan saja (tanpa k6)
-npm run stack:down     # urutan shutdown sudah diurus script
+make stack-down     # urutan shutdown sudah diurus script
 ```
 
 Panel dashboard: total request, request gagal, check lulus, VU maksimum, request/detik, latensi p50/p95/p99, sebaran request per server, dan status code. Ada variabel **Run** untuk memfilter satu eksekusi tertentu — tiap run diberi tag `run` berisi timestamp, jadi run lama tetap bisa dibandingkan.
@@ -381,17 +384,17 @@ docker compose -p lb-k6 -f docker-compose.monitoring.yml run --rm k6 run failove
 
 Catatan jujur soal versi: k6 v2.4.0 menandai output `influxdb` (dan `experimental-prometheus-rw`) sebagai **deprecated**, rencananya dihapus di k6 v3 dan diganti OpenTelemetry. Untuk demo ini tetap dipakai karena paling stabil dan dashboard-nya sudah terbukti berisi data; kalau nanti pindah ke k6 v3, ganti ke output OpenTelemetry + datasource Prometheus/Tempo.
 
-Hasil terukur dari container (`npm run k6:run`, 15 detik, 100 req/detik):
+Hasil terukur dari container (`make k6-run`, 15 detik, 100 req/detik):
 
 ```
 http_reqs: 1500   99.99/detik
 http_req_failed: 0.00%   checks_succeeded: 100.00%
 served: 1500 (total; rincian per server di Grafana)
   server-1 375 · server-2 375 · server-3 375 · server-4 375
-report.html (k6:watch): 167 KB
+report.html (k6-watch): 167 KB
 ```
 
-`k6:watch` menahan proses selama tab browser dashboard masih terbuka — tutup tab (atau tekan Ctrl+C) kalau run sudah selesai.
+`k6-watch` menahan proses selama tab browser dashboard masih terbuka — tutup tab (atau tekan Ctrl+C) kalau run sudah selesai.
 
 ### 7b. Memicu k6 dari Grafana
 
@@ -410,7 +413,7 @@ Kenapa begini:
 - Endpoint ini **tanpa autentikasi**. Siapa pun yang bisa membuka `trigger.localhost` bisa memulai Run; guard-nya cuma single-flight. Untuk lokal aman, jangan diekspos ke internet tanpa auth.
 - Ganti intensitas: ubah `RATE` / `DURATION` di service `k6-runner` (`docker-compose.monitoring.yml`), lalu `docker compose -p lb-k6 -f docker-compose.monitoring.yml up -d k6-runner`.
 
-Alternatif tanpa Grafana tetap ada: `npm run k6:run` (sekali) dan `npm run k6:watch` (plus web dashboard k6 + `report.html`).
+Alternatif tanpa Grafana tetap ada: `make k6-run` (sekali) dan `make k6-watch` (plus web dashboard k6 + `report.html`).
 
 ### 7c. Monitoring database MariaDB
 
@@ -436,7 +439,7 @@ backend /metrics (lb_db_*) ─────────────────�
 
 Empat alert Grafana (provisioning, tanpa Alertmanager): `mariadb-down` (critical, 30s), `mariadb-connections-high`, `mariadb-slow-queries`, `api-db-errors`. Belum ada contact point keluar — statusnya dilihat di Grafana. Cara menambah email/Telegram ada di panduan.
 
-`npm run db:up` dan `db:reset` otomatis menjalankan `npm run db:grant-exporter`, jadi volume database lama tidak perlu dihapus untuk mengaktifkan monitoring.
+`make db-up` dan `db-reset` otomatis menjalankan `make db-grant-exporter`, jadi volume database lama tidak perlu dihapus untuk mengaktifkan monitoring.
 
 Panduan lengkap (metrik, LogQL, alert, uji gangguan, troubleshooting) ada di [`docs/database-monitoring.md`](docs/database-monitoring.md); keputusan desainnya di [`docs/adr/0010-monitoring-database.md`](docs/adr/0010-monitoring-database.md).
 
@@ -453,14 +456,14 @@ Database berada di **project compose sendiri** (`lb-db`, file `docker-compose.db
 | Monitoring DB | `lb-k6` | `http://grafana.localhost/d/db-monitoring` (exporter, alert, log Loki) |
 
 ```bash
-npm run db:up      # MariaDB + Adminer
-npm run db:reset   # buang volume, jalankan ulang skema + seed
-npm run db:down    # data di volume lb-db-data tetap
+make db-up      # MariaDB + Adminer
+make db-reset   # buang volume, jalankan ulang skema + seed
+make db-down    # data di volume lb-db-data tetap
 ```
 
 Kredensial demo: database `lb_demo`, user `lb_app`, password `lb_app_password` (bisa diganti lewat `.env`; lihat `.env.example`). Buka `http://adminer.localhost` (cadangan: `http://127.0.0.1:8081`); di Adminer, server diisi **`mariadb`**, bukan `localhost`.
 
-Skema ada di `db/init/001-schema.sql`, tabel `registered_servers` (`id`, `name`, `host`, `port`, `weight`, `enabled`, `note`, `created_at`, `updated_at`) dengan seed `server-1`…`server-5`. Skrip init hanya dijalankan MariaDB saat volume masih kosong; perubahan skema pada volume lama butuh `npm run db:reset`.
+Skema ada di `db/init/001-schema.sql`, tabel `registered_servers` (`id`, `name`, `host`, `port`, `weight`, `enabled`, `note`, `created_at`, `updated_at`) dengan seed `server-1`…`server-5`. Skrip init hanya dijalankan MariaDB saat volume masih kosong; perubahan skema pada volume lama butuh `make db-reset`.
 
 API:
 
@@ -492,10 +495,10 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | `http://server-2.localhost` saat server-2 mati | **404** — tidak menipu dengan mengalihkan ke server lain |
 | 300 request / 20 konkuren via `server.localhost` | **0 gagal**, ±600–1685 req/detik (bervariasi antar run) |
 | Sebaran 30 request | **6 request tiap server**, kelima server kebagian |
-| `npm test` diulang | **6/6 lulus** (dengan 5 server) |
+| `make test` diulang | **6/6 lulus** (dengan 5 server) |
 | `grafana.localhost` / `traefik.localhost` setelah dipisah | **200**, tidak nyasar ke backend (router prioritas 200 menang atas fallback `demo` prioritas 1) |
-| `k6.localhost` saat `npm run k6:watch` | **200** selama run, router hilang ~6 detik setelah k6 selesai |
-| `npm run stack:up` dijalankan ulang | **idempotent**: "network lb-net sudah ada", container yang sudah hidup tidak dibuat ulang |
+| `k6.localhost` saat `make k6-watch` | **200** selama run, router hilang ~6 detik setelah k6 selesai |
+| `make stack-up` dijalankan ulang | **idempotent**: "network lb-net sudah ada", container yang sudah hidup tidak dibuat ulang |
 | Dashboard `lb-realtime` saat backend hidup | 10 panel berisi data; scrape 6 target (`traefik` + 5 backend) `up=1` |
 | 30 request manual ke `server.localhost` | test mengukur 6 request per server, tanpa gagal |
 | Klik "Run k6" di dashboard Grafana | trigger 200 → Run 15 detik selesai (1500 request) → tag `run` baru muncul di InfluxDB; klik kedua saat run berjalan dibalas halaman "Run masih berjalan" |
@@ -511,28 +514,28 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | Log error terpusat | baris `CRUD ditolak: nama server duplikat` dari `lb-demo-server-1-1` muncul di Loki < 10 detik; log `Version: '11.4.13-MariaDB'` dari `lb-db-mariadb-1` juga masuk |
 | MariaDB dimatikan | `up{job="mariadb"}` → **0**; CRUD **503** `DATABASE_UNAVAILABLE` (kode driver `ETIMEDOUT` tercatat); `/` dan `/health` tetap **200** |
 | Alert saat DB mati | `mariadb-down` → **firing** setelah ±90 detik (evaluasi 1m + `for` 30s), `health: ok` |
-| DB dihidupkan lagi | `mysql_up` → **1**, CRUD **200**, tanpa restart backend; `db:grant-exporter` idempotent |
+| DB dihidupkan lagi | `mysql_up` → **1**, CRUD **200**, tanpa restart backend; `db-grant-exporter` idempotent |
 
 ## 10. Batasan (sengaja, karena ini project demo/pembelajaran)
 
 - Statistik tidak dikumpulkan sendiri — dibaca dari API/dashboard Traefik.
-- `responseHeaderTimeout 2s` berarti endpoint yang sengaja lambat > 2 detik (mis. `/slow?ms=5000`) akan dipotong bila lewat Traefik. Naikkan nilainya di `docker/traefik/traefik.yml` bila perlu (lalu `npm run traefik:down && npm run traefik:up`, karena config statis hanya dibaca saat start).
+- `responseHeaderTimeout 2s` berarti endpoint yang sengaja lambat > 2 detik (mis. `/slow?ms=5000`) akan dipotong bila lewat Traefik. Naikkan nilainya di `docker/traefik/traefik.yml` bila perlu (lalu `make traefik-down && make traefik-up`, karena config statis hanya dibaca saat start).
 - `retry` Traefik secara default hanya untuk metode idempotent (GET/HEAD); POST tidak diulang. Bisa diubah dengan `retryNonIdempotentMethod=true` bila memang aman.
 - Belum ada TLS, autentikasi, sticky session, rate limiting, atau circuit breaker.
 - Endpoint demo (`/`, `/slow`) tidak menyimpan state; request berikutnya bisa dilayani server lain. Katalog server **disimpan** di MariaDB dan dibagi semua backend.
 - UI CRUD dan API `/api/servers` **tanpa autentikasi**: siapa pun yang bisa membuka `/ui` bisa menulis. Hanya untuk lokal.
 - Katalog server **bukan** sumber konfigurasi rotasi. Menambah/menghapus baris tidak mengubah server yang dipakai Traefik; rotasi tetap dari label container.
 - MariaDB memakai kredensial demo (`lb_app` / `lb_app_password`), tanpa port 3306 ke host, dan tanpa replika/backup. Adminer tanpa auth tambahan: lewat `adminer.localhost` ia ikut terbuka di port 80 (bisa dijangkau mesin lain di LAN bila nama itu resolve), sedangkan `127.0.0.1:8081` hanya loopback.
-- `db/init/001-schema.sql` hanya dijalankan saat volume `lb-db-data` kosong. Perubahan skema pada volume lama butuh `npm run db:reset`, yang **menghapus data**.
+- `db/init/001-schema.sql` hanya dijalankan saat volume `lb-db-data` kosong. Perubahan skema pada volume lama butuh `make db-reset`, yang **menghapus data**.
 - `docker.sock` di-mount read-only, tapi tetap memberi akses ke Docker API — hanya untuk demo lokal, jangan diekspos ke internet.
 - Dashboard `api.insecure=true` tanpa login di port 8089 **dan** di `http://traefik.localhost/dashboard/`. Endpoint `/metrics` Traefik juga ikut terbuka di sana (port 8080 tidak dipublikasikan, tapi 8089 memuat API yang sama).
 - Grafana memakai kredensial default `admin/admin` dan viewer anonim; InfluxDB tanpa autentikasi dan tidak dipublikasikan ke host. Hanya untuk lokal.
 - Prometheus tanpa autentikasi dan tanpa port publik — hanya bisa diakses dari network `lb-net` / `lb-k6-net`. Retensi 7 hari. Loki juga tanpa auth, tanpa port host, retensi 7 hari.
-- User `lb_exporter` memakai password demo (`lb_exporter_password`) dan punya `PROCESS` + `REPLICATION CLIENT` pada semua database. Ganti lewat `MARIADB_EXPORTER_PASSWORD` + `npm run db:grant-exporter` bila perlu.
+- User `lb_exporter` memakai password demo (`lb_exporter_password`) dan punya `PROCESS` + `REPLICATION CLIENT` pada semua database. Ganti lewat `MARIADB_EXPORTER_PASSWORD` + `make db-grant-exporter` bila perlu.
 - Alert database dikelola Grafana dan **belum punya contact point**: status firing hanya terlihat di Grafana, tidak ada email/Telegram/webhook. Slow query log MariaDB juga belum diaktifkan, jadi `slow_queries` adalah status server.
 - Loki menyimpan **semua** baris log container yang diberi label `lb.logs=true` (MariaDB + backend), bukan hanya error. Retensi 7 hari membatasi pertumbuhan.
 - Grafana hanya membaca ulang datasource/dashboard/alert provisioning saat start, dan Prometheus tidak memuat ulang `prometheus.yml` otomatis. Setelah mengubah file itu: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana` dan/atau `docker restart lb-k6-prometheus-1`.
-- Data monitoring disimpan di volume Docker (`influxdb-data`, `prometheus-data`, `loki-data`, `alloy-data`, `grafana-data`); `npm run k6:down` tidak menghapusnya, `... down -v` menghapusnya.
+- Data monitoring disimpan di volume Docker (`influxdb-data`, `prometheus-data`, `loki-data`, `alloy-data`, `grafana-data`); `make k6-down` tidak menghapusnya, `... down -v` menghapusnya.
 - Metrik backend disimpan di memori proses: counter kembali 0 setiap container backend dibuat ulang, dan Prometheus ikut melihatnya sebagai reset (rate tetap benar, angka total tidak). Ini termasuk `lb_db_*`.
 - Scrape 2 detik berarti puncak trafik yang lebih pendek dari 2 detik bisa terlewat. Ini kompromi "cukup realtime" vs beban scrape.
 - Pemicu `trigger.localhost` tanpa autentikasi dan hanya menjaga single-flight: siapa pun yang bisa membuka host itu (termasuk viewer anonim Grafana) bisa memulai Run. Parameter Run juga tetap, tidak bisa diubah dari UI.
@@ -540,8 +543,8 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - Prometheus memegang `docker.sock` read-only dan berjalan sebagai root hanya untuk penemuan target. Container tanpa label `lb.monitor=true` tidak akan dipantau, walau ada di `lb-net`.
 - Riwayat k6 terputus sekali: run sebelum metric `served` diperkenalkan memakai `served_server_N` dan tidak lagi tampil di panel sebaran. Run baru memakai `served` + tag `server`.
 - Panel total (`2xx`, `4xx+5xx`) memakai `increase(...[$__range])`, jadi angkanya ikut rentang waktu dashboard, bukan total seumur hidup. Counter Traefik reset saat container Traefik dibuat ulang.
-- `npm test` hanya mematikan `lb-demo`; Traefik dibiarkan hidup. Kalau ingin benar-benar bersih, jalankan `npm run stack:down`.
-- Network `lb-net` dibuat di luar compose, jadi `docker network prune` bisa menghapusnya saat semua container mati; pulihkan dengan `npm run net:up`.
+- `make test` hanya mematikan `lb-demo`; Traefik dibiarkan hidup. Kalau ingin benar-benar bersih, jalankan `make stack-down`.
+- Network `lb-net` dibuat di luar compose, jadi `docker network prune` bisa menghapusnya saat semua container mati; pulihkan dengan `make net-up`.
 
 Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah teknis di [`GLOSSARY.md`](GLOSSARY.md), panduan database/CRUD di [`docs/database-crud.md`](docs/database-crud.md), panduan monitoring database di [`docs/database-monitoring.md`](docs/database-monitoring.md), dan cara menambah server baru di [`docs/menambah-server.md`](docs/menambah-server.md).
 
@@ -549,45 +552,46 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 
 | Gejala | Penyebab & solusi |
 |---|---|
+| `make` tidak dikenali (`'make' is not recognized` / `command not found`) | GNU Make belum terpasang. Windows: `choco install make` atau GnuWin32 Make; Linux: paket `make`; macOS: `xcode-select --install`. Buka terminal baru setelah instalasi, lalu coba `make help`. |
 | `test` dilewati ("Docker daemon tidak berjalan") | Nyalakan Docker Desktop, tunggu status "running", ulangi. |
-| `bind: address already in use` saat `docker:up` | Port 80/8088/8089 dipakai proses lain. Bebaskan port 80, atau tetap pakai `http://127.0.0.1:8088` (sudah dipetakan juga). |
-| `http://server.localhost` balas **404** | Traefik membuang router `demo` karena ambigu. Cek `docker compose -p lb-traefik -f docker-compose.traefik.yml logs traefik \| Select-String "cannot be linked"`. Pastikan label `traefik.http.routers.demo.service: demo` ada, lalu `npm run docker:up`. |
-| Perubahan `traefik.yml` tidak berefek | Config statis hanya dibaca saat start: `npm run traefik:down && npm run traefik:up` (bind mount saja tidak cukup). |
+| `bind: address already in use` saat `docker-up` | Port 80/8088/8089 dipakai proses lain. Bebaskan port 80, atau tetap pakai `http://127.0.0.1:8088` (sudah dipetakan juga). |
+| `http://server.localhost` balas **404** | Traefik membuang router `demo` karena ambigu. Cek `docker compose -p lb-traefik -f docker-compose.traefik.yml logs traefik \| Select-String "cannot be linked"`. Pastikan label `traefik.http.routers.demo.service: demo` ada, lalu `make docker-up`. |
+| Perubahan `traefik.yml` tidak berefek | Config statis hanya dibaca saat start: `make traefik-down && make traefik-up` (bind mount saja tidak cukup). |
 | `server.localhost` tidak resolve (`curl exit 7`) | Berarti tidak ada yang listen, bukan masalah DNS. Pastikan stack hidup. Bila OS benar-benar tidak resolve `*.localhost`, tambahkan `127.0.0.1 server.localhost server-1.localhost server-2.localhost server-3.localhost server-4.localhost server-5.localhost` ke hosts file (butuh admin). Test otomatis tidak butuh ini karena memakai header `Host`. |
 | Request menggantung lama saat server dimatikan | `responseHeaderTimeout` di `traefik.yml` (2s) yang membatasi; tanpa itu request bisa menunggu tanpa batas. |
-| Dashboard Traefik kosong / service tidak muncul | Cek `docker compose -p lb-traefik -f docker-compose.traefik.yml logs traefik`; pastikan container backend berstatus `healthy` (`npm run docker:ps`). |
-| Ingin bersih total (termasuk image) | `npm run stack:down`, lalu `docker compose -p lb-demo down --rmi local` |
-| `k6 belum terpasang` | `npm run k6:install` (butuh Bun + akses GitHub). |
-| `k6:install` gagal HTTP 403 | Rate limit GitHub API; tunggu beberapa menit atau unduh manual rilis k6. |
-| Grafana kosong / "No data" | Pastikan sudah ada run: `npm run k6:run`. Cek datasource: `http://grafana.localhost/api/datasources` harus berisi `k6-influxdb`. Cek data: `docker compose -p lb-k6 -f docker-compose.monitoring.yml exec -T influxdb influx -database k6 -execute 'SHOW MEASUREMENTS'`. |
-| Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards/k6` dan `.../lb`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `npm run k6:logs`. |
-| `lb-realtime` kosong / "No data" | Datasource `prometheus` belum ada atau Prometheus mati. Cek `http://grafana.localhost/api/datasources` (harus ada uid `prometheus`), lalu `npm run k6:up`. |
-| Panel "Status target scrape" merah (DOWN) | Target tidak bisa di-scrape. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml logs prometheus`. Penyebab umum: backend mati, atau Prometheus tidak menempel di `lb-net` (`npm run k6:down && npm run k6:up`). |
+| Dashboard Traefik kosong / service tidak muncul | Cek `docker compose -p lb-traefik -f docker-compose.traefik.yml logs traefik`; pastikan container backend berstatus `healthy` (`make docker-ps`). |
+| Ingin bersih total (termasuk image) | `make clean` — sama dengan `make stack-down`, lalu menghapus image lokal `lb-demo`. Volume tidak disentuh. |
+| `k6 belum terpasang` | `make k6-install` (butuh Bun + akses GitHub). |
+| `k6-install` gagal HTTP 403 | Rate limit GitHub API; tunggu beberapa menit atau unduh manual rilis k6. |
+| Grafana kosong / "No data" | Pastikan sudah ada run: `make k6-run`. Cek datasource: `http://grafana.localhost/api/datasources` harus berisi `k6-influxdb`. Cek data: `docker compose -p lb-k6 -f docker-compose.monitoring.yml exec -T influxdb influx -database k6 -execute 'SHOW MEASUREMENTS'`. |
+| Dashboard tidak muncul di Grafana | Dashboard dibaca dari `monitoring/grafana/dashboards/k6` dan `.../lb`; `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`, lalu cek log `make k6-logs`. |
+| `lb-realtime` kosong / "No data" | Datasource `prometheus` belum ada atau Prometheus mati. Cek `http://grafana.localhost/api/datasources` (harus ada uid `prometheus`), lalu `make k6-up`. |
+| Panel "Status target scrape" merah (DOWN) | Target tidak bisa di-scrape. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml logs prometheus`. Penyebab umum: backend mati, atau Prometheus tidak menempel di `lb-net` (`make k6-down && make k6-up`). |
 | Target backend baru tidak muncul di Prometheus | Container tidak punya label `lb.monitor=true` (cek `docker inspect <container> --format '{{index .Config.Labels "lb.monitor"}}'`) — label ini ada di `x-main-labels`, jadi server baru otomatis dapat. Kalau log Prometheus berisi `permission denied ... docker.sock`, pastikan mount socket read-only dan `user: "0:0"` masih ada, lalu recreate Prometheus. |
 | Panel sebaran k6 kosong untuk semua server | Panel baru membaca metric `served` (tag `server`). Run lama memakai `served_server_N` dan tidak tampil. Jalankan Run baru lewat link "Run k6". |
-| Metrik `traefik_*` tidak ada di Prometheus | `metrics.prometheus` di `docker/traefik/traefik.yml` hanya dibaca saat start: `npm run traefik:down && npm run traefik:up`. Verifikasi: `curl http://127.0.0.1:8089/metrics \| Select-String traefik_entrypoint_requests_total`. |
-| `k6` di container gagal resolve `server.localhost` | Alias network hanya aktif kalau traefik dibuat ulang setelah `docker-compose.traefik.yml` diubah: `npm run traefik:down && npm run traefik:up`. Cek: `docker run --rm --network lb-net alpine:3 nslookup server.localhost`. |
-| `docker compose` gagal: `network lb-net declared as external, but could not be found` | Network belum dibuat: `npm run net:up`. |
+| Metrik `traefik_*` tidak ada di Prometheus | `metrics.prometheus` di `docker/traefik/traefik.yml` hanya dibaca saat start: `make traefik-down && make traefik-up`. Verifikasi: `curl http://127.0.0.1:8089/metrics \| Select-String traefik_entrypoint_requests_total`. |
+| `k6` di container gagal resolve `server.localhost` | Alias network hanya aktif kalau traefik dibuat ulang setelah `docker-compose.traefik.yml` diubah: `make traefik-down && make traefik-up`. Cek: `docker run --rm --network lb-net alpine:3 nslookup server.localhost`. |
+| `docker compose` gagal: `network lb-net declared as external, but could not be found` | Network belum dibuat: `make net-up`. |
 | `grafana.localhost` balas JSON backend | Label router Grafana hilang atau prioritasnya tidak lebih tinggi dari `demo` (harus 200). Cek `http://127.0.0.1:8089/api/http/routers` dan pastikan `grafana@docker` berstatus `enabled`. |
-| `adminer.localhost` balas JSON backend / 404 | Label router Adminer belum termuat atau prioritasnya bukan 200. `npm run db:up` (recreate Adminer), lalu cek `http://127.0.0.1:8089/api/http/routers` dan pastikan `adminer@docker` `enabled`. Selama itu pakai `http://127.0.0.1:8081`. |
+| `adminer.localhost` balas JSON backend / 404 | Label router Adminer belum termuat atau prioritasnya bukan 200. `make db-up` (recreate Adminer), lalu cek `http://127.0.0.1:8089/api/http/routers` dan pastikan `adminer@docker` `enabled`. Selama itu pakai `http://127.0.0.1:8081`. |
 | `adminer.localhost` tidak resolve | DNS OS tidak menangani nama itu. Tambahkan `127.0.0.1 adminer.localhost` ke hosts file, atau langsung pakai `http://127.0.0.1:8081`. |
-| `k6.localhost` balas 404 | Normal kalau k6 tidak sedang jalan — router hanya ada selama `npm run k6:watch`. |
-| Link "Run k6" di Grafana tidak berefek / `trigger.localhost` 404 | `k6-runner` belum jalan: `npm run k6:up`. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml ps k6-runner` dan log container-nya. |
+| `k6.localhost` balas 404 | Normal kalau k6 tidak sedang jalan — router hanya ada selama `make k6-watch`. |
+| Link "Run k6" di Grafana tidak berefek / `trigger.localhost` 404 | `k6-runner` belum jalan: `make k6-up`. Cek `docker compose -p lb-k6 -f docker-compose.monitoring.yml ps k6-runner` dan log container-nya. |
 | Klik "Run k6" tapi dashboard tidak terisi | Lihat log run: `docker exec lb-k6-k6-runner-1 tail -30 /tmp/k6-run.log`. Cek `K6_OUT` menunjuk `http://influxdb:8086/k6` dan runner ada di network `lb-k6-net` + `lb-net`. |
 | Klik "Run k6" dibalas "Run masih berjalan" padahal tidak ada run | Lock tertinggal setelah runner mati di tengah run: `docker exec lb-k6-k6-runner-1 rmdir /tmp/k6.lock` (atau restart container). |
-| `k6:watch` tidak bisa dibuka di 5665 | `docker compose run` tidak mempublikasikan port kecuali `--service-ports` — script sudah memakainya. Pastikan port 5665 bebas. |
+| `k6-watch` tidak bisa dibuka di 5665 | `docker compose run` tidak mempublikasikan port kecuali `--service-ports` — script sudah memakainya. Pastikan port 5665 bebas. |
 | `report.html` tidak dibuat | k6 melewati ekspor bila run terlalu pendek ("not enough data"): butuh durasi > 3× `K6_WEB_DASHBOARD_PERIOD` (di sini 2s → minimal ~6s). |
-| `/ui` menampilkan "Database tidak bisa dihubungi" / API 503 | MariaDB belum hidup atau kredensial beda: `npm run db:up`, lalu cek `npm run db:ps`. Pesan `DATABASE_NOT_INITIALIZED` berarti tabel belum ada: `npm run db:reset`. |
+| `/ui` menampilkan "Database tidak bisa dihubungi" / API 503 | MariaDB belum hidup atau kredensial beda: `make db-up`, lalu cek `make db-ps`. Pesan `DATABASE_NOT_INITIALIZED` berarti tabel belum ada: `make db-reset`. |
 | CRUD terasa lambat lalu 504 | `connectTimeout` DB harus di bawah `responseHeaderTimeout` Traefik (2s). Nilai saat ini 1 detik (`DB_CONNECT_TIMEOUT_MS`), jangan dinaikkan melewati 2 detik. |
 | Adminer gagal connect | Isi server **`mariadb`** (nama service), bukan `localhost`/`127.0.0.1`. User `lb_app`, database `lb_demo`. Adminer hanya jalan setelah MariaDB healthy. |
-| `bind: address already in use` saat `db:up` | Port 8081 dipakai proses lain. Set `ADMINER_PORT=8082` di `.env`, lalu `npm run db:up`. |
-| Perubahan `db/init/001-schema.sql` tidak berefek | SQL init hanya jalan saat volume kosong: `npm run db:reset` (menghapus data katalog). |
-| `npm run db:down` lalu `db:up`, data hilang | Data tidak hilang oleh `down`; hanya `down -v` / `db:reset` yang menghapus volume `lb-db-data`. Pastikan tidak ada perintah `down -v` manual. |
+| `bind: address already in use` saat `db-up` | Port 8081 dipakai proses lain. Set `ADMINER_PORT=8082` di `.env`, lalu `make db-up`. |
+| Perubahan `db/init/001-schema.sql` tidak berefek | SQL init hanya jalan saat volume kosong: `make db-reset` (menghapus data katalog). |
+| `make db-down` lalu `make db-up`, data hilang | Data tidak hilang oleh `down`; hanya `down -v` / `db-reset` yang menghapus volume `lb-db-data`. Pastikan tidak ada perintah `down -v` manual. |
 | Dashboard `db-monitoring` tidak muncul / datasource `loki` tidak ada | File provisioning baru hanya dibaca saat Grafana start: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`. Cek `http://grafana.localhost/api/datasources`. |
-| `up{job="mariadb"}` = 0 / `mysql_up` kosong | Exporter tidak bisa scrape atau login. Cek `docker logs lb-k6-mysqld-exporter-1`, jalankan `npm run db:grant-exporter`, pastikan `MARIADB_EXPORTER_PASSWORD` sama di `.env` dan compose. |
+| `up{job="mariadb"}` = 0 / `mysql_up` kosong | Exporter tidak bisa scrape atau login. Cek `docker logs lb-k6-mysqld-exporter-1`, jalankan `make db-grant-exporter`, pastikan `MARIADB_EXPORTER_PASSWORD` sama di `.env` dan compose. |
 | Target `mariadb` hilang dari Prometheus setelah edit config | `prometheus.yml` hanya dibaca saat start: `docker restart lb-k6-prometheus-1`, lalu cek `/api/v1/targets`. |
-| Panel log database kosong | Container tidak berlabel `lb.logs=true` (label ada di `x-main-labels` dan service `mariadb`; recreate dengan `npm run docker:up` / `npm run db:up`), atau Alloy/Loki mati: `docker logs lb-k6-alloy-1`. |
+| Panel log database kosong | Container tidak berlabel `lb.logs=true` (label ada di `x-main-labels` dan service `mariadb`; recreate dengan `make docker-up` / `make db-up`), atau Alloy/Loki mati: `docker logs lb-k6-alloy-1`. |
 | Alert `Backend gagal mengakses database` terus NoData | Query alert harus selalu punya nilai. Rule ini memakai `or vector(0)`; kalau menambah rule baru, pakai pola sama atau set `noDataState: OK`. |
 | Alert firing tetapi tidak ada email/Telegram | Memang belum ada contact point: Grafana → Alerting → Contact points, lalu arahkan notification policy grup `database`. |
-| `db:grant-exporter` gagal `Access denied for user 'root'` | `MARIADB_ROOT_PASSWORD` di `.env` beda dengan password volume lama. Pakai password yang benar; `db:reset` hanya pilihan terakhir karena menghapus data. |
+| `db-grant-exporter` gagal `Access denied for user 'root'` | `MARIADB_ROOT_PASSWORD` di `.env` beda dengan password volume lama. Pakai password yang benar; `db-reset` hanya pilihan terakhir karena menghapus data. |
 | `npm install` tidak perlu untuk menjalankan stack | Image backend sudah `npm ci`; `npm install` lokal hanya untuk menjalankan backend/unit test tanpa Docker. |

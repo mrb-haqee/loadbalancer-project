@@ -5,7 +5,7 @@ name: lb-traefik
 # network lb-net (backend di project lb-demo, Grafana/k6 di project lb-k6,
 # Adminer di project lb-db).
 #
-# Network lb-net dibuat sekali di luar compose (`npm run net:up`), supaya tidak
+# Network lb-net dibuat sekali di luar compose (`make net-up`), supaya tidak
 # ada project yang jadi "induk" tersembunyi dari project lain.
 
 services:

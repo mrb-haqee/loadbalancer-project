@@ -138,7 +138,7 @@ services:
 # Network terisolasi: tidak menyentuh network project lain
 # (proxy, sanmedclinic_internal, shared-api, dll).
 # Traefik TIDAK ada di file ini (lihat docker-compose.traefik.yml), jadi
-# network dibuat di luar compose lewat `npm run net:up` dan dipakai bersama.
+# network dibuat di luar compose lewat `make net-up` dan dipakai bersama.
 networks:
   lb-net:
     external: true

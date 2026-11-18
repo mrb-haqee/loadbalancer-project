@@ -6,7 +6,7 @@
  * - File init hanya dijalankan saat volume masih kosong.
  * - Password exporter dibaca dari env, jadi tidak ditulis dua kali.
  *
- * Idempotent: aman dijalankan berkali-kali. `db:up` dan `db:reset` memanggil
+ * Idempotent: aman dijalankan berkali-kali. `db-up` dan `db-reset` memanggil
  * script ini otomatis supaya volume lama ikut punya user exporter.
  */
 import { spawnSync } from 'node:child_process';
@@ -79,7 +79,7 @@ try {
   }
   console.log('user lb_exporter siap (PROCESS, REPLICATION CLIENT)');
 } catch (error) {
-  console.error(`[db:grant-exporter] ${error.message}`);
-  console.error('[db:grant-exporter] pastikan `npm run db:up` sudah jalan dan MARIADB_ROOT_PASSWORD benar.');
+  console.error(`[db-grant-exporter] ${error.message}`);
+  console.error('[db-grant-exporter] pastikan `make db-up` sudah jalan dan MARIADB_ROOT_PASSWORD benar.');
   process.exit(1);
 }

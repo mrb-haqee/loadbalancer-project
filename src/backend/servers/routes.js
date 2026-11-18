@@ -42,7 +42,7 @@ function handleDatabaseError(res, headers, error) {
       res,
       503,
       'DATABASE_NOT_INITIALIZED',
-      'Tabel registered_servers belum ada. Jalankan SQL init lewat `npm run db:reset`.',
+      'Tabel registered_servers belum ada. Jalankan SQL init lewat `make db-reset`.',
       undefined,
       headers,
     );
@@ -53,7 +53,7 @@ function handleDatabaseError(res, headers, error) {
       res,
       503,
       'DATABASE_UNAVAILABLE',
-      'Database tidak bisa dihubungi. Pastikan `npm run db:up` sudah jalan dan kredensial DB benar.',
+      'Database tidak bisa dihubungi. Pastikan `make db-up` sudah jalan dan kredensial DB benar.',
       undefined,
       headers,
     );

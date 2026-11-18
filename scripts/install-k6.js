@@ -112,4 +112,4 @@ rmSync(TEMP_DIR, { recursive: true, force: true });
 
 printVersion();
 console.log(`\nJalankan: bun scripts/k6.js run k6/load-test.js`);
-console.log(`Atau    : npm run k6:load   (default BASE_URL=http://server.localhost)`);
+console.log(`Atau    : make k6-load   (default BASE_URL=http://server.localhost)`);

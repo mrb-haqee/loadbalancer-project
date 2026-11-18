@@ -60,8 +60,8 @@ groups:
           summary: MariaDB mati atau tidak bisa di-scrape
           description: >
             `up{job="mariadb"}` bernilai 0 atau tidak ada data selama 30 detik.
-            Cek `npm run db:ps`, `docker logs lb-db-mariadb-1`, dan kredensial
-            user `lb_exporter` (`npm run db:grant-exporter`).
+            Cek `make db-ps`, `docker logs lb-db-mariadb-1`, dan kredensial
+            user `lb_exporter` (`make db-grant-exporter`).
         labels:
           severity: critical
           component: database

@@ -9,3 +9,4 @@ tools
 *.log
 *.md
 docker-compose*.yml
+Makefile

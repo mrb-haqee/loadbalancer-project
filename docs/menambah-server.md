@@ -66,7 +66,7 @@ Kenapa cuma ini:
   MariaDB. Tanpa itu, CRUD di server-6 membalas 503.
 
 Tidak perlu `build:` — image `lb-demo-backend:latest` sudah ada. Kalau ingin build ulang:
-`npm run docker:up`.
+`make docker-up`.
 
 Opsional, tambahkan baris katalog supaya UI ikut menampilkan server-6:
 
@@ -76,7 +76,7 @@ curl -s -X POST http://server.localhost/api/servers \
   -d '{"name":"server-6","host":"server-6","port":3000,"weight":1,"enabled":true,"note":"backend keenam"}'
 ```
 
-Atau edit `db/init/001-schema.sql` lalu `npm run db:reset`. Ingat: baris katalog **tidak**
+Atau edit `db/init/001-schema.sql` lalu `make db-reset`. Ingat: baris katalog **tidak**
 membuat Traefik mengarahkan trafik ke container; label compose yang melakukannya.
 
 ## 2. Monitoring: tidak ada yang perlu diubah
@@ -130,11 +130,11 @@ dan label `waitFor`-nya ikut diubah menjadi `'6 server terdaftar dan berstatus U
 ## 4. Verifikasi
 
 ```bash
-npm run docker:up
+make docker-up
 curl http://server-6.localhost/siapa-kamu          # harus servedBy server-6
 curl -s http://127.0.0.1:8089/api/http/services     # demo@docker harus 6 server
-npm run test:backend                                # unit test validasi CRUD
-npm test                                            # harus lulus semua
+make test-backend                                    # unit test validasi CRUD
+make test                                            # harus lulus semua
 ```
 
 Cek UI: `http://server-6.localhost/ui` harus terbuka dan menampilkan katalog yang sama
@@ -150,7 +150,7 @@ server" harus punya 6 garis, "Backend sehat" = 6.
 - **Lupa `x-direct-6`** → `server-6.localhost` 404, padahal pool sudah berisi 6 server.
 - **Lupa `*db-env`** → UI/CRUD di server-6 balas 503 `DATABASE_UNAVAILABLE`, padahal
   endpoint demo tetap jalan.
-- **Lupa menaikkan angka di test** → `npm test` timeout menunggu "5 server" padahal
+- **Lupa menaikkan angka di test** → `make test` timeout menunggu "5 server" padahal
   Traefik punya 6, atau failover gagal karena daftar server tersisa masih 4.
 - **DNS `*.localhost`** tidak selalu resolve untuk nama baru di Windows. Test otomatis
   aman (memakai header `Host`); untuk browser, tambahkan entri hosts bila perlu.

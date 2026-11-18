@@ -559,7 +559,7 @@
       rows.innerHTML = `
         <tr><td class="empty" colspan="7">
           <b>Katalog masih kosong.</b>
-          Tambah server pertama lewat form di atas, atau jalankan <code>npm run db:reset</code> untuk memuat seed.
+          Tambah server pertama lewat form di atas, atau jalankan <code>make db-reset</code> untuk memuat seed.
         </td></tr>`;
       return;
     }
@@ -576,7 +576,7 @@
     } catch (error) {
       state.servers = [];
       $('count').textContent = '0 server';
-      const hint = error.status === 503 ? ' Jalankan <code>npm run db:up</code>, lalu muat ulang.' : '';
+      const hint = error.status === 503 ? ' Jalankan <code>make db-up</code>, lalu muat ulang.' : '';
       rows.innerHTML = `
         <tr><td class="empty" colspan="7">
           <b>Katalog belum bisa dimuat.</b>

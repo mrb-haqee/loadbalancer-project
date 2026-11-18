@@ -130,7 +130,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Pembaca Database (Adminer)** — Halaman web untuk membuka tabel dan isi MariaDB tanpa menulis query. Punya dua pintu: `adminer.localhost` lewat Traefik (router prioritas 200) dan `127.0.0.1:8081` sebagai cadangan loopback. Tanpa auth tambahan; hanya untuk lokal.
 
-**SQL Init** — Skrip SQL yang dijalankan MariaDB sekali saat volume database masih kosong. Perubahan pada skrip itu tidak berlaku pada volume yang sudah berisi data; karena itu ada `db:reset`.
+**SQL Init** — Skrip SQL yang dijalankan MariaDB sekali saat volume database masih kosong. Perubahan pada skrip itu tidak berlaku pada volume yang sudah berisi data; karena itu ada `db-reset`.
 
 **Pool Koneksi** — Kumpulan koneksi database yang dipakai ulang backend, bukan satu koneksi baru per request. Pool dibuat malas: backend tetap start dan tetap sehat walau MariaDB belum hidup.
 
@@ -140,7 +140,7 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 
 **Exporter (`mysqld-exporter`)** — Service kecil yang login ke MariaDB lalu menerjemahkan `SHOW GLOBAL STATUS` dan `SHOW GLOBAL VARIABLES` menjadi metrik Prometheus (`mysql_*`). Di project ini hidup di `lb-k6`, tanpa port host.
 
-**User Exporter (`lb_exporter`)** — User MariaDB khusus untuk exporter, dengan hak `PROCESS` dan `REPLICATION CLIENT`. Dibuat idempotent oleh `npm run db:grant-exporter`; bukan user aplikasi (`lb_app`) dan tidak dipakai backend.
+**User Exporter (`lb_exporter`)** — User MariaDB khusus untuk exporter, dengan hak `PROCESS` dan `REPLICATION CLIENT`. Dibuat idempotent oleh `make db-grant-exporter`; bukan user aplikasi (`lb_app`) dan tidak dipakai backend.
 
 **Metrik DB Aplikasi (`lb_db_*`)** — Metrik query database yang dihitung backend sendiri dan diekspor di `/metrics`: jumlah query per operasi, jumlah error per kode driver, dan histogram durasi. Tetap ada saat exporter ikut buta karena database mati.
 
@@ -157,3 +157,11 @@ Istilah yang dipakai di project ini beserta makna yang disepakati.
 **Contact Point** — Tujuan notifikasi alert (email, Telegram, webhook). Di project ini belum ada, jadi alert hanya terlihat di Grafana; menambahkannya tidak mengubah arsitektur.
 
 **Retensi** — Lama data disimpan sebelum dibuang: 7 hari untuk Prometheus dan Loki di project ini.
+
+## Istilah operasional
+
+**Makefile** — Satu-satunya sumber perintah operasional project (stack, database, Traefik, backend, monitoring, test, k6). Menggantikan blok `"scripts"` di `package.json`; `make` tanpa argumen menampilkan daftar target. Keputusan dan konsekuensinya ada di [`docs/adr/0011-perintah-pindah-ke-makefile.md`](docs/adr/0011-perintah-pindah-ke-makefile.md).
+
+**Target** — Satu pekerjaan bernama di Makefile, mis. `make db-up`. Nama memakai hyphen, bukan titik dua, karena `:` adalah pemisah target:prerequisite di Make.
+
+**Prasyarat (prerequisite)** — Target lain yang harus selesai lebih dulu; dipakai `stack-up` agar urutan `net-up → db-up → traefik-up → docker-up → k6-up` eksplisit dan berhenti saat satu langkah gagal.

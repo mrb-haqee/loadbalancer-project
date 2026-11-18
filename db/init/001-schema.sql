@@ -1,6 +1,6 @@
 -- Dijalankan MariaDB SEKALI, saat volume lb-db-data masih kosong.
 -- Perubahan di file ini tidak berlaku pada volume yang sudah berisi data:
--- gunakan `npm run db:reset` untuk membuang volume lalu menjalankannya lagi.
+-- gunakan `make db-reset` untuk membuang volume lalu menjalankannya lagi.
 
 CREATE TABLE IF NOT EXISTS registered_servers (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,

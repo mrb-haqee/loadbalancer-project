@@ -13,7 +13,7 @@ name: lb-k6
 #
 # Kenapa exporter/Loki/Alloy ada di sini, bukan di stack database:
 # `lb-db` sengaja hanya berisi data (MariaDB + Adminer). Semua yang membaca
-# data tinggal di stack monitoring, jadi `npm run db:down` tidak mematikan
+# data tinggal di stack monitoring, jadi `make db-down` tidak mematikan
 # alat pantau, dan MariaDB tetap tidak punya port host maupun rute Traefik.
 
 services:
@@ -44,7 +44,7 @@ services:
   #   tanpa port host dan tanpa rute Traefik.
   # - Di `lb-k6-net` supaya Prometheus (target statis `mysqld-exporter:9104`)
   #   bisa men-scrape-nya. Tidak ada port yang dipublikasikan ke host.
-  # - User `lb_exporter` dibuat oleh `npm run db:grant-exporter`
+  # - User `lb_exporter` dibuat oleh `make db-grant-exporter`
   #   (butuh PROCESS + REPLICATION CLIENT; `lb_app` tidak punya PROCESS).
   # Kalau MariaDB mati, exporter bisa berhenti; `restart` membuatnya menyambung
   # lagi sendiri begitu database hidup, tanpa perlu `docker compose up` ulang.
@@ -183,7 +183,7 @@ services:
     environment:
       # Output metrik ke InfluxDB (lihat catatan deprecation di README).
       K6_OUT: influxdb=http://influxdb:8086/k6
-      # Live dashboard hanya aktif kalau diminta: `npm run k6:watch`.
+      # Live dashboard hanya aktif kalau diminta: `make k6-watch`.
       K6_WEB_DASHBOARD: ${K6_WEB_DASHBOARD:-false}
       K6_WEB_DASHBOARD_HOST: 0.0.0.0
       K6_WEB_DASHBOARD_PORT: "5665"
@@ -197,7 +197,7 @@ services:
       - ./monitoring/reports:/reports
     labels:
       traefik.enable: "true"
-      # Router ini hanya muncul selama k6 hidup (npm run k6:watch).
+      # Router ini hanya muncul selama k6 hidup (make k6-watch).
       traefik.http.routers.k6-web.entrypoints: "web"
       traefik.http.routers.k6-web.rule: "Host(`k6.localhost`)"
       traefik.http.routers.k6-web.priority: "200"

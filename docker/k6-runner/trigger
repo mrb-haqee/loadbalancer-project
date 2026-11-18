@@ -1,7 +1,7 @@
 #!/bin/sh
 # CGI pemicu: dipanggil dari link "Run k6" di dashboard Grafana.
 # Satu Run pada satu waktu (lock direktori bersifat atomik di filesystem).
-# Hasil Run masuk ke InfluxDB lewat K6_OUT, sama seperti `npm run k6:run`.
+# Hasil Run masuk ke InfluxDB lewat K6_OUT, sama seperti `make k6-run`.
 
 set -u
 

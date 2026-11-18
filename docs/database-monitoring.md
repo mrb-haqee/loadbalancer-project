@@ -10,8 +10,8 @@ bukan di stack database `lb-db`.
 `lb-k6`:
 
 - MariaDB tetap tanpa port host dan tanpa rute Traefik.
-- `npm run db:down` tidak ikut mematikan dashboard atau alat pantau.
-- `npm run k6:down` tidak menyentuh database.
+- `make db-down` tidak ikut mematikan dashboard atau alat pantau.
+- `make k6-down` tidak menyentuh database.
 - Satu-satunya jembatan adalah `mysqld-exporter`, yang menempel di `lb-net` untuk
   menjangkau `mariadb:3306` dan di `lb-k6-net` supaya bisa di-scrape Prometheus.
 
@@ -28,15 +28,15 @@ bukan di stack database `lb-db`.
 Jalankan semuanya:
 
 ```bash
-npm run db:up        # MariaDB + Adminer, lalu menyegarkan user lb_exporter
-npm run k6:up        # Grafana, Prometheus, exporter, Loki, Alloy, ...
+make db-up        # MariaDB + Adminer, lalu menyegarkan user lb_exporter
+make k6-up        # Grafana, Prometheus, exporter, Loki, Alloy, ...
 ```
 
-`db:up` dan `db:reset` otomatis memanggil `scripts/db-grant-exporter.js`. Kalau user
+`db-up` dan `db-reset` otomatis memanggil `scripts/db-grant-exporter.js`. Kalau user
 exporter perlu disegarkan tanpa menyalakan ulang DB:
 
 ```bash
-npm run db:grant-exporter
+make db-grant-exporter
 ```
 
 ## User exporter
@@ -51,7 +51,7 @@ npm run db:grant-exporter
 | Hak | `PROCESS`, `REPLICATION CLIENT` pada `*.*` |
 
 Dibuat idempotent oleh `scripts/db-grant-exporter.js` (bukan lewat `db/init`), supaya
-volume `lb-db-data` yang sudah ada ikut mendapatkannya tanpa `db:reset` — `db:reset`
+volume `lb-db-data` yang sudah ada ikut mendapatkannya tanpa `db-reset` — `db-reset`
 menghapus data katalog.
 
 Ekspor password ke exporter lewat env compose:
@@ -62,7 +62,7 @@ mysqld-exporter:
     MYSQLD_EXPORTER_PASSWORD: ${MARIADB_EXPORTER_PASSWORD:-lb_exporter_password}
 ```
 
-Kalau password diganti di `.env`, jalankan `npm run db:grant-exporter`, lalu
+Kalau password diganti di `.env`, jalankan `make db-grant-exporter`, lalu
 `docker compose -p lb-k6 -f docker-compose.monitoring.yml up -d mysqld-exporter`.
 
 ## Metrik
@@ -242,7 +242,7 @@ curl.exe -s -o NUL -w "%{http_code}`n" http://server-1.localhost/              #
 
 # 5. hidupkan lagi
 docker compose -p lb-db -f docker-compose.db.yml start mariadb
-npm run db:grant-exporter
+make db-grant-exporter
 #    mysql_up -> 1, CRUD -> 200, alert kembali normal
 ```
 
@@ -276,16 +276,16 @@ Angka yang terukur:
 
 | Gejala | Penyebab & solusi |
 |---|---|
-| `up{job="mariadb"}` = 0, `mysql_up` tidak ada | Exporter gagal login. Cek `docker logs lb-k6-mysqld-exporter-1`; jalankan `npm run db:grant-exporter`; pastikan `MARIADB_EXPORTER_PASSWORD` sama di DB dan compose. |
+| `up{job="mariadb"}` = 0, `mysql_up` tidak ada | Exporter gagal login. Cek `docker logs lb-k6-mysqld-exporter-1`; jalankan `make db-grant-exporter`; pastikan `MARIADB_EXPORTER_PASSWORD` sama di DB dan compose. |
 | `mysql_up` = 0 tetapi exporter hidup | User ada tapi hak kurang. Cek `SHOW GRANTS FOR 'lb_exporter'@'%'` lewat Adminer/root; harus ada `PROCESS` dan `REPLICATION CLIENT`. |
-| Dashboard kosong setelah `k6:up` | Grafana belum membaca provisioning baru: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`. |
+| Dashboard kosong setelah `k6-up` | Grafana belum membaca provisioning baru: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`. |
 | Target `mariadb` tidak ada di Prometheus | `prometheus.yml` belum dimuat: `docker restart lb-k6-prometheus-1`. Cek `/api/v1/targets` lewat Grafana. |
 | Panel log kosong | Container tidak punya label `lb.logs=true` (cek `docker inspect`), atau Alloy/Loki mati. `docker logs lb-k6-alloy-1` dan `docker logs lb-k6-loki-1`. |
 | Log MariaDB lama tidak muncul | Retensi 7 hari; Loki hanya menyimpan sejak Alloy pertama jalan. Log sebelum itu tetap ada di `docker logs`. |
-| Alloy log `could not inspect container info ... No such container` | Normal sesaat setelah container di-recreate (`npm test`, `docker:up`): Alloy sempat menail container lama. Log container baru tetap masuk; pesan hilang sendiri. |
+| Alloy log `could not inspect container info ... No such container` | Normal sesaat setelah container di-recreate (`make test`, `docker-up`): Alloy sempat menail container lama. Log container baru tetap masuk; pesan hilang sendiri. |
 | Alert NoData terus menyala | Query alert mengembalikan deret kosong. Untuk `api-db-errors` sudah ditambahkan `or vector(0)`; rule baru harus mengikuti pola yang sama atau mengatur `noDataState: OK`. |
 | Alert firing tapi tidak ada notifikasi | Memang belum ada contact point; lihat bagian "Menambah notifikasi keluar". |
-| `db:grant-exporter` gagal "Access denied" | `MARIADB_ROOT_PASSWORD` di `.env` berbeda dengan password volume lama. Pakai password yang benar, atau `npm run db:reset` (menghapus data). |
+| `db-grant-exporter` gagal "Access denied" | `MARIADB_ROOT_PASSWORD` di `.env` berbeda dengan password volume lama. Pakai password yang benar, atau `make db-reset` (menghapus data). |
 
 ## Verifikasi cepat
 

@@ -28,28 +28,28 @@ Traefik hanya menambah rute bila Traefik hidup.
 ## Menjalankan
 
 ```bash
-npm run net:up     # sekali: network lb-net
-npm run db:up      # MariaDB + Adminer (project lb-db)
-npm run docker:up  # 5 backend (project lb-demo), image memuat driver mysql2
+make net-up     # sekali: network lb-net
+make db-up      # MariaDB + Adminer (project lb-db)
+make docker-up  # 5 backend (project lb-demo), image memuat driver mysql2
 ```
 
 Semua sekaligus:
 
 ```bash
-npm run stack:up   # net:up -> db:up -> traefik:up -> docker:up -> k6:up
-npm run stack:down # k6:down -> docker:down -> traefik:down -> db:down
+make stack-up   # net-up -> db-up -> traefik-up -> docker-up -> k6-up
+make stack-down # k6-down -> docker-down -> traefik-down -> db-down
 ```
 
 | Perintah | Arti |
 |---|---|
-| `npm run db:up` | Nyalakan MariaDB + Adminer |
-| `npm run db:down` | Matikan keduanya (data di volume tetap) |
-| `npm run db:reset` | Hapus volume `lb-db-data`, buat ulang skema + seed |
-| `npm run db:logs` | Log MariaDB + Adminer |
-| `npm run db:ps` | Status + health container database |
-| `npm run db:grant-exporter` | Buat/segarkan user monitoring `lb_exporter` (tanpa mengubah data) |
+| `make db-up` | Nyalakan MariaDB + Adminer |
+| `make db-down` | Matikan keduanya (data di volume tetap) |
+| `make db-reset` | Hapus volume `lb-db-data`, buat ulang skema + seed |
+| `make db-logs` | Log MariaDB + Adminer |
+| `make db-ps` | Status + health container database |
+| `make db-grant-exporter` | Buat/segarkan user monitoring `lb_exporter` (tanpa mengubah data) |
 
-Urutan penting: `lb-net` harus ada sebelum `db:up` dan `docker:up`.
+Urutan penting: `lb-net` harus ada sebelum `db-up` dan `docker-up`.
 
 ## Kredensial
 
@@ -100,7 +100,7 @@ Kalau file init diubah setelah volume dibuat, perubahan **tidak** otomatis masuk
 Jalankan:
 
 ```bash
-npm run db:reset
+make db-reset
 ```
 
 ## API
@@ -144,7 +144,7 @@ curl -i -X DELETE http://server-3.localhost/api/servers/6
 | 409 | `DUPLICATE_NAME` | `name` sudah dipakai |
 | 413 | `BODY_TOO_LARGE` | body > 64 KB |
 | 503 | `DATABASE_UNAVAILABLE` | MariaDB mati / kredensial salah |
-| 503 | `DATABASE_NOT_INITIALIZED` | tabel belum ada, jalankan `db:reset` |
+| 503 | `DATABASE_NOT_INITIALIZED` | tabel belum ada, jalankan `db-reset` |
 
 `/health` **tidak** mengecek database. Kalau MariaDB mati, Traefik tetap menganggap
 backend sehat dan endpoint demo (`/`, `/slow`, `/metrics`) tetap bekerja; hanya CRUD
@@ -163,7 +163,7 @@ HTML/CSS/JS tanpa framework dan tanpa build step, berisi:
 - tautan ke Adminer (`adminer.localhost`, cadangan `127.0.0.1:8081`).
 
 Halaman ini statis dan disalin ke image backend; setelah mengubah
-`src/backend/public/index.html`, jalankan `npm run docker:up` lagi.
+`src/backend/public/index.html`, jalankan `make docker-up` lagi.
 `/` tetap mengembalikan JSON echo seperti sebelumnya — UI sengaja di path terpisah
 supaya test load balancing tidak berubah.
 
@@ -172,7 +172,7 @@ supaya test load balancing tidak berubah.
 Kesehatan database dipantau dari stack `lb-k6`, bukan dari `lb-db`:
 
 - `mysqld-exporter` membaca status MariaDB lewat user `lb_exporter`
-  (`PROCESS` + `REPLICATION CLIENT`) yang dibuat `npm run db:grant-exporter`.
+  (`PROCESS` + `REPLICATION CLIENT`) yang dibuat `make db-grant-exporter`.
 - Backend menambahkan metrik `lb_db_queries_total`, `lb_db_errors_total`, dan
   `lb_db_query_duration_seconds` ke `/metrics`.
 - Log MariaDB dan backend dikirim Alloy ke Loki (label `lb.logs=true`).
@@ -197,7 +197,7 @@ docker compose -p lb-db -f docker-compose.db.yml stop mariadb
 curl -s -o /dev/null -w '%{http_code}' http://server-1.localhost/api/servers   # 503 (1,1 detik)
 curl -s -o /dev/null -w '%{http_code}' http://server-1.localhost/health        # 200
 # sementara itu di Grafana: up{job="mariadb"} -> 0, lalu alert mariadb-down firing
-docker compose -p lb-db -f docker-compose.db.yml start mariadb && npm run db:grant-exporter
+docker compose -p lb-db -f docker-compose.db.yml start mariadb && make db-grant-exporter
 
 # Adminer lewat Traefik dan lewat port cadangan
 curl -s -o /dev/null -w '%{http_code}' http://adminer.localhost/               # 200 (halaman login)
@@ -212,4 +212,4 @@ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/                  #
 - Kredensial demo tersimpan sebagai default compose dan bisa dilihat di repo.
 - Katalog tidak mengubah rotasi Traefik dan tidak dibaca oleh Prometheus/k6.
 - Monitoring database hanya untuk lokal: Grafana/Loki tanpa auth tambahan, exporter memakai password demo, dan alert belum punya notifikasi keluar.
-- Satu instance MariaDB, tanpa replika/backup. `db:reset` menghapus data.
+- Satu instance MariaDB, tanpa replika/backup. `db-reset` menghapus data.
