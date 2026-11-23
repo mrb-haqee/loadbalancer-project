@@ -233,9 +233,9 @@ di menu **Alerting** serta panel **Alert database**.
 |---|---|---|---|---|
 | `db-no-primary` | Tidak ada node bisa ditulis | `count(mysql_global_variables_read_only == 0) or vector(0) < 1` | 30s | critical |
 | `db-multiple-writable` | Lebih dari satu node bisa ditulis | `count(... == 0) or vector(0) > 1` | 1m | critical |
-| `db-node-down` | Satu node tidak terjangkau | `min by (node) (mysql_up) or vector(0) < 1` | 1m | warning |
-| `db-replica-stopped` | Replikasi berhenti | `min by (node) (mysql_slave_status_slave_sql_running) or vector(0) < 1` | 1m | warning |
-| `db-replica-lag` | Replika tertinggal | `max by (node) (mysql_slave_status_seconds_behind_master) or vector(0) > 10` | 1m | warning |
+| `db-node-down` | Satu node tidak terjangkau | `(mysql_up == 0) or (up{job="mariadb"} == 0)` | 1m | warning |
+| `db-replica-stopped` | Replikasi berhenti (IO atau SQL) | `(slave_io_running == 0) or (slave_sql_running == 0)` | 1m | warning |
+| `db-replica-lag` | Replika tertinggal | `max by (node) (mysql_slave_status_seconds_behind_master) > 10` | 1m | warning |
 | `mariadb-connections-high` | Koneksi hampir penuh | `max by (node) (threads_connected / max_connections) > 0.8` | 2m | warning |
 | `mariadb-slow-queries` | Slow query menumpuk | `increase(slow_queries[5m]) > 5` | 1m | warning |
 | `api-db-errors` | Backend gagal mengakses database | `sum(rate(lb_db_errors_total{code!="ER_DUP_ENTRY"}[2m])) > 0` | 1m | warning |
@@ -253,6 +253,16 @@ Catatan:
   `db-no-primary`.
 - `db-replica-stopped` dan `db-replica-lag` memakai `noDataState: OK` karena metrik
   `mysql_slave_status_*` memang tidak ada di node yang menjadi primary.
+- `db-replica-stopped` mengecek IO **dan** SQL. Saat IO berhenti, SQL bisa tetap `Yes`
+  dan lag menjadi NULL (metriknya hilang) — `db-replica-lag` tidak menangkapnya,
+  rule ini yang menangkap.
+- `db-node-down` juga mengecek `up{job="mariadb"}`: exporter yang mati membuat
+  `mysql_up` hilang, bukan 0; `up` target scrape-nya yang jadi 0.
+- **`or vector(0)` hanya untuk agregasi tanpa label** (`count`, `sum`). Dengan
+  `by (node)`, seri hasil berlabel `{node=...}` sedangkan `vector(0)` berlabel `{}`;
+  `or` tidak pernah mencocokkannya dan selalu menambah seri hantu bernilai 0 —
+  threshold `< 1` jadi firing terus di cluster sehat. Rule per-node memakai filter
+  `== 0` + `noDataState: OK` sebagai gantinya.
 - `api-db-errors` memakai `or vector(0)` supaya "tidak ada error" berarti nilai 0, bukan
   NoData. Tanpa itu, Grafana terus menampilkan alert NoData saat sistem sehat.
 - `ER_DUP_ENTRY` dikecualikan: itu konflik nama dari UI, bukan gangguan database.
@@ -325,7 +335,7 @@ curl.exe -s -o NUL -w "%{http_code}`n" http://server-1.localhost/api/servers   #
 curl.exe -s -o NUL -w "%{http_code}`n" http://server-1.localhost/health        # 200
 
 # metrik: ketiga target melaporkan mysql_up 0; tidak ada node read_only=0
-# alert db-no-primary -> firing setelah 30 detik
+# alert db-no-primary -> firing ~60 detik (for: 30s, tapi grup dievaluasi tiap 1m)
 
 docker compose -p lb-db -f docker-compose.db.yml start mariadb-primary mariadb-replica-1 mariadb-replica-2
 make db-up     # idempotent: grant + clone ulang node yang tertinggal
@@ -346,7 +356,8 @@ master, klien menerima 503 cepat — bukan menunggu sampai `responseHeaderTimeou
 - `performance_schema` dimatikan di MariaDB demo, jadi metrik per-query tidak tersedia.
 - Alert hanya terlihat di Grafana; belum ada notifikasi keluar.
 - Grafana, Loki, dan Prometheus tanpa autentikasi tambahan. Hanya untuk lokal.
-- Grafana hanya membaca ulang **provisioning datasource/dashboard/alert** saat start.
+- Grafana hanya membaca ulang **provisioning datasource/alert** saat start
+  (dashboard dibaca ulang tiap 30 detik).
   Setelah menambah file provisioning baru: `docker compose -p lb-k6 -f
   docker-compose.monitoring.yml restart grafana`.
 - Prometheus memuat ulang `prometheus.yml` otomatis (`--config.auto-reload`), tetapi
@@ -370,7 +381,7 @@ master, klien menerima 503 cepat — bukan menunggu sampai `responseHeaderTimeou
 | Panel log kosong | Container tidak punya label `lb.logs=true` (cek `docker inspect`), atau Alloy/Loki mati. `docker logs lb-k6-alloy-1` dan `docker logs lb-k6-loki-1`. |
 | Log MariaDB lama tidak muncul | Retensi 7 hari; Loki hanya menyimpan sejak Alloy pertama jalan. Log sebelum itu tetap ada di `docker logs`. |
 | Alloy log `could not inspect container info ... No such container` | Normal sesaat setelah container di-recreate (`make test`, `docker-up`): Alloy sempat menail container lama. Log container baru tetap masuk; pesan hilang sendiri. |
-| Alert NoData terus menyala | Query alert mengembalikan deret kosong. `db-no-primary` memakai `or vector(0)`; rule baru harus mengikuti pola yang sama atau mengatur `noDataState: OK`. |
+| Alert NoData terus menyala | Query alert mengembalikan deret kosong. `db-no-primary` memakai `or vector(0)` (sah karena `count` tanpa label); rule per-node memakai filter `== 0` + `noDataState: OK`. Jangan pakai `or vector(0)` pada agregasi `by (node)` — seri hantu `{}` membuat alert selalu firing. |
 | Alert firing tapi tidak ada notifikasi | Memang belum ada contact point; lihat bagian "Menambah notifikasi keluar". |
 | `db-grant-users` gagal "Access denied" | `MARIADB_ROOT_PASSWORD` di `.env` berbeda dengan password volume lama. Pakai password yang benar, atau `make db-reset` (menghapus data). |
 

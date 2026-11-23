@@ -611,6 +611,8 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 | Log error terpusat | baris `CRUD ditolak: nama server duplikat` dari `lb-demo-server-1-1` muncul di Loki < 10 detik; log `Version: '11.4.13-MariaDB'` dari `lb-db-mariadb-primary-1` dan baris `[mariadbmon] Performing automatic failover` dari MaxScale juga masuk |
 | Primary dimatikan (monitoring) | `mysql_up{node="mariadb-primary"}` → **0**, dua node lain tetap **1**; `mysql_slave_status_seconds_behind_master` hilang dari node yang dipromosikan (normal) |
 | Alert database | 8 rule terprovisi; `db-node-down`/`db-replica-stopped`/`db-replica-lag` memakai `for: 1m`, jadi gangguan yang pulih sendiri dalam semenit hanya terlihat di panel, belum sempat firing |
+| IO thread replika dihentikan (`STOP SLAVE IO_THREAD`) | `db-replica-stopped` firing ~2 menit dengan label `node=mariadb-replica-1`; sebelum fix IO+SQL, berhenti IO tidak teralert sama sekali. Setelah `START SLAVE IO_THREAD`: alert inactive, IO/SQL `Yes`, lag 0 |
+| Cluster sehat, semua alert diam | `db-node-down`/`db-replica-stopped` inactive tanpa instance firing — seri hantu `or vector(0)` pada agregasi `by (node)` sudah dihapus |
 | DB dihidupkan lagi | `mysql_up` → **1**, CRUD **200**, tanpa restart backend; `make db-grant-users` idempotent |
 
 ## 10. Batasan (sengaja, karena ini project demo/pembelajaran)
@@ -641,7 +643,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - User `lb_exporter` memakai password demo (`lb_exporter_password`) dan punya `PROCESS` + `REPLICATION CLIENT` + `SLAVE MONITOR` pada semua database. Ganti lewat `MARIADB_EXPORTER_PASSWORD` + `make db-grant-users` bila perlu.
 - Alert dikelola Grafana dan **belum punya contact point**: status firing hanya terlihat di Grafana, tidak ada email/Telegram/webhook. Slow query log MariaDB juga belum diaktifkan, jadi `slow_queries` adalah status server.
 - Loki menyimpan baris log container yang diberi label `lb.logs=true` (3 node MariaDB, MaxScale, semua backend, serta access log error/lambat Traefik). Retensi 7 hari membatasi pertumbuhan.
-- Grafana hanya membaca ulang datasource/dashboard/alert provisioning saat start. Prometheus otomatis memuat ulang perubahan `prometheus.yml` (`--config.auto-reload`), sedangkan perubahan provisioning Grafana butuh `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`.
+- Grafana hanya membaca ulang datasource/alert provisioning saat start (dashboard dibaca ulang tiap 30 detik). Prometheus otomatis memuat ulang perubahan `prometheus.yml` (`--config.auto-reload`), sedangkan perubahan provisioning Grafana butuh `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`.
 - Data monitoring disimpan di volume Docker (`prometheus-data`, `loki-data`, `alloy-data`, `grafana-data`); `make k6-down` tidak menghapusnya, `... down -v` menghapusnya.
 - Metrik backend disimpan di memori proses: counter kembali 0 setiap container backend dibuat ulang, dan Prometheus ikut melihatnya sebagai reset (rate tetap benar, angka total tidak). Ini termasuk `lb_db_*`.
 - Scrape 2 detik berarti puncak trafik yang lebih pendek dari 2 detik bisa terlewat. Ini kompromi "cukup realtime" vs beban scrape.
@@ -709,7 +711,7 @@ Keputusan desain beserta alasannya ada di [`docs/adr/`](docs/adr/), istilah tekn
 | Perubahan `db/init/001-schema.sql` tidak berefek | SQL init hanya jalan saat volume kosong: `make db-reset` (menghapus data katalog). |
 | `make db-down` lalu `make db-up`, data hilang | Data tidak hilang oleh `down`; hanya `down -v` / `db-reset` yang menghapus volume `lb-db-data` dan dua volume replika. Pastikan tidak ada perintah `down -v` manual. |
 | Dashboard `db-monitoring` tidak muncul / datasource `loki` tidak ada | File provisioning baru hanya dibaca saat Grafana start: `docker compose -p lb-k6 -f docker-compose.monitoring.yml restart grafana`. Cek `http://grafana.localhost/api/datasources`. |
-| Alert `Backend gagal mengakses database` terus NoData | Query alert harus selalu punya nilai. Rule ini memakai `or vector(0)`; kalau menambah rule baru, pakai pola sama atau set `noDataState: OK`. |
+| Alert `Backend gagal mengakses database` terus NoData | Query alert harus selalu punya nilai. Rule ini memakai `or vector(0)` (sah karena `sum` tanpa label). Rule per-node (`by (node)`) jangan pakai pola itu — seri hantu `{}` membuat alert selalu firing; pakai filter `== 0` + `noDataState: OK`. |
 | Alert firing tetapi tidak ada email/Telegram | Memang belum ada contact point: Grafana → Alerting → Contact points, lalu arahkan notification policy grup `database`. |
 | `db-grant-users` gagal `Access denied for user 'root'` | `MARIADB_ROOT_PASSWORD` di `.env` beda dengan password volume lama. Pakai password yang benar; `db-reset` hanya pilihan terakhir karena menghapus data. |
 | `bun install` tidak perlu untuk menjalankan stack | Image backend sudah `bun install --production`; `bun install` lokal hanya untuk `bunx tsc --noEmit` dan `make test-backend` tanpa Docker. |

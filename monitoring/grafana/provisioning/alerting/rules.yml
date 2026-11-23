@@ -280,9 +280,13 @@ groups:
         annotations:
           summary: Dua node atau lebih menerima penulisan (risiko split brain)
           description: >
-            MaxScale seharusnya memaksa `read_only=ON` pada semua node non-master.
-            Kalau ini menyala lebih dari semenit, MaxScale mungkin mati atau
-            node bekas primary baru dinyalakan tanpa `make db-rejoin`.
+            Dua node atau lebih menerima tulisan. Penyebab tersering: bekas
+            primary baru hidup lagi tanpa `make db-rejoin` — ia masih
+            `read_only=OFF` dan tidak disentuh `enforce_read_only_slaves`
+            karena belum punya konfigurasi slave (sengaja, `auto_rejoin=false`).
+            Penyebab lain: MaxScale mati. Jangan menulis ke node mana pun
+            sebelum `make db-status` menjelaskan siapa primary yang sah, lalu
+            `make db-rejoin DB_NODE=<bekas primary>`.
         labels:
           severity: critical
           component: database
@@ -299,7 +303,12 @@ groups:
             datasourceUid: prometheus
             model:
               editorMode: code
-              expr: min by (node) (mysql_up{job="mariadb"}) or vector(0)
+              # Tanpa `or vector(0)`: agregasi `by (node)` berlabel {node=...},
+              # sedangkan vector(0) berlabel {} — `or` selalu menambahkannya sebagai
+              # seri hantu bernilai 0, membuat threshold `< 1` firing terus di cluster
+              # sehat. Filter `== 0` + noDataState: OK menggantikannya; `up` menangkap
+              # exporter yang mati (mysql_up-nya ikut hilang).
+              expr: (mysql_up{job="mariadb"} == 0) or (up{job="mariadb"} == 0)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -332,11 +341,12 @@ groups:
         execErrState: Error
         for: 1m
         annotations:
-          summary: Exporter node {{ $labels.node }} tidak bisa login ke MariaDB
+          summary: Node {{ $labels.node }} tidak terjangkau (MariaDB atau exporter)
           description: >
-            `mysql_up{node="{{ $labels.node }}"}` bernilai 0 selama semenit.
-            Node ini bisa mati, atau kredensial `lb_exporter` hilang setelah
-            volume dibuat ulang (`make db-grant-users`).
+            `mysql_up{node="{{ $labels.node }}"}` bernilai 0 (node mati, atau
+            kredensial `lb_exporter` hilang setelah volume dibuat ulang —
+            `make db-grant-users`), atau `up` target exporter-nya 0 (exporter
+            mati / tidak bisa di-scrape).
         labels:
           severity: warning
           component: database
@@ -353,7 +363,10 @@ groups:
             datasourceUid: prometheus
             model:
               editorMode: code
-              expr: min by (node) (mysql_slave_status_slave_sql_running{job="mariadb"}) or vector(0)
+              # IO ikut dicek: saat IO berhenti, SQL bisa tetap Yes dan lag jadi
+              # NULL (metriknya hilang) — alert lag tidak menangkapnya. Pola seri
+              # hantu `or vector(0)` dilarang di sini; lihat db-node-down.
+              expr: (mysql_slave_status_slave_io_running{job="mariadb"} == 0) or (mysql_slave_status_slave_sql_running{job="mariadb"} == 0)
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -386,10 +399,11 @@ groups:
         execErrState: Error
         for: 1m
         annotations:
-          summary: Replika {{ $labels.node }} berhenti menerapkan event
+          summary: Replika {{ $labels.node }} berhenti mengambil atau menerapkan event
           description: >
-            `Slave_SQL_Running=No` pada node ini. Replika seperti ini tidak boleh
-            dipromosikan. Perbaiki dengan `make db-rejoin DB_NODE={{ $labels.node }}`.
+            `Slave_IO_Running=No` atau `Slave_SQL_Running=No` pada node ini.
+            Replika seperti ini tidak boleh dipromosikan. Perbaiki dengan
+            `make db-rejoin DB_NODE={{ $labels.node }}`.
         labels:
           severity: warning
           component: database
@@ -406,7 +420,7 @@ groups:
             datasourceUid: prometheus
             model:
               editorMode: code
-              expr: max by (node) (mysql_slave_status_seconds_behind_master{job="mariadb"}) or vector(0)
+              expr: max by (node) (mysql_slave_status_seconds_behind_master{job="mariadb"})
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200

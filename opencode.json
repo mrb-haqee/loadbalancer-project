@@ -90,6 +90,18 @@
               "text"
             ]
           }
+        },
+        "kn/qwen4-max:free": {
+          "name": "kn/qwen4-max:free",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
         }
       }
     }

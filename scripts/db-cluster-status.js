@@ -6,8 +6,10 @@
  * Peran dibaca dari `@@read_only`, bukan dari nama container. Setelah failover,
  * `mariadb-replica-1` bisa menjadi primary — nama tidak lagi menipu.
  *
- * `make db-status` memanggil skrip ini. Exit code 1 bila tidak ada tepat satu
- * primary, supaya bisa dipakai di skrip/CI.
+ * `make db-status` memanggil skrip ini. Exit code 1 bila primary tidak bisa
+ * ditentukan (MaxScale mati dan jumlah node writable ≠ 1). Selama MaxScale
+ * hidup, primary menurutnya dipercaya meski node lain masih writable — bekas
+ * primary sebelum rejoin; tabel di bawah tetap menunjukkan keduanya.
  */
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';

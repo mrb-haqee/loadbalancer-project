@@ -388,7 +388,7 @@
       "id": 7,
       "type": "stat",
       "title": "Koneksi terpakai",
-      "description": "**Arti**: persentase `max_connections` pada node yang paling penuh.\n**Konteks**: backend memakai pool 5 koneksi × 5 backend = 25 koneksi; batas MariaDB 151 per node.\n**Normal**: < 50%.\n**Jika > 80%**: alert `mariadb-connections-high` menyala; kurangi konkurensi atau naikkan batas.",
+      "description": "**Arti**: persentase `max_connections` pada node yang paling penuh.\n**Konteks**: backend memakai pool 10 koneksi × 5 backend = 50 koneksi; batas MariaDB 151 per node.\n**Normal**: < 50%.\n**Jika > 80%**: alert `mariadb-connections-high` menyala; kurangi konkurensi atau naikkan batas.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1171,7 +1171,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "Koneksi per node",
-      "description": "**Arti**: tiga garis per node: koneksi terbuka, yang sedang menjalankan query, dan batas `max_connections`.\n**Normal**: terbuka jauh di bawah batas (pool backend 25 koneksi).\n**Jika garis terbuka mendekati batas**: alert `mariadb-connections-high`; CRUD akan mulai ditolak.",
+      "description": "**Arti**: tiga garis per node: koneksi terbuka, yang sedang menjalankan query, dan batas `max_connections`.\n**Normal**: terbuka jauh di bawah batas (pool backend 50 koneksi).\n**Jika garis terbuka mendekati batas**: alert `mariadb-connections-high`; CRUD akan mulai ditolak.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
