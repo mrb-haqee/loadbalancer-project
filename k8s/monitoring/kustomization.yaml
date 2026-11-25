@@ -1,0 +1,19 @@
+# Monitoring in-cluster: Prometheus + Grafana, tanpa operator.
+#
+# Tidak ada Loki/Alloy di sini: log tetap dibaca dengan `kubectl logs`. Menambah
+# Loki + Alloy berarti DaemonSet, RBAC discovery, dan volume log host - layak
+# dipelajari, tetapi bukan syarat untuk memahami metrik. Jalur upgrade: deploy
+# Loki single-binary, lalu Alloy DaemonSet dengan discovery `loki.source.kubernetes`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+resources:
+  - namespace.yaml
+  - prometheus.yaml
+  - grafana.yaml
+
+# traefik-metrics.yaml sengaja tidak masuk daftar ini: ia harus berada di
+# namespace traefik, sedangkan kustomization ini memaksa namespace monitoring.
+# Makefile menerapkannya terpisah.

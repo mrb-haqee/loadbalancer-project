@@ -1,0 +1,17 @@
+# Service tambahan untuk metrik Traefik. Service utama chart hanya membuka
+# 80/443, sedangkan entrypoint "metrics" mendengarkan di 9100. Label selector
+# mengikuti label bawaan chart.
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-metrics
+  namespace: traefik
+  labels:
+    app.kubernetes.io/name: traefik
+spec:
+  selector:
+    app.kubernetes.io/name: traefik
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: 9100

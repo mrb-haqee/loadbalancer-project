@@ -22,6 +22,7 @@ COMPOSE_K6      := docker compose -p lb-k6 -f docker-compose.monitoring.yml
 K8S_CLUSTER   ?= lb-k8s
 K8S_CONTEXT   ?= k3d-$(K8S_CLUSTER)
 K8S_NAMESPACE ?= lb-demo
+K8S_MONITORING_NAMESPACE ?= monitoring
 K8S_IMAGE     ?= lb-backend:dev
 K8S_TRAEFIK_CHART   ?= 39.0.7
 K8S_TRAEFIK_IMAGE   ?= traefik:v3.6.6
@@ -54,7 +55,7 @@ MAKEFLAGS += --no-print-directory
 	test test-backend test-docker test-db crud-load \
 	k6-install k6 k6-load k6-failover \
 	k8s-cluster k8s-ingress k8s-image k8s-up k8s-down k8s-bootstrap \
-	k8s-status k8s-logs k8s-load k8s-smoke k8s-destroy
+	k8s-status k8s-logs k8s-load k8s-smoke k8s-destroy k8s-monitoring k8s-monitoring-down
 
 help:
 	@echo Daftar target Makefile:
@@ -101,8 +102,9 @@ help:
 	@echo     make k6-load          100 req/detik selama 15 detik
 	@echo     make k6-failover      50 req/detik selama 40 detik - untuk uji failover
 	@echo   Kubernetes - belajar orkestrasi, port 8080:
-	@echo     make k8s-bootstrap     Buat cluster k3d + Traefik + image + manifest
+	@echo     make k8s-bootstrap     Buat cluster k3d + Traefik + image + manifest + monitoring
 	@echo     make k8s-up            Terapkan manifest saja
+	@echo     make k8s-monitoring    Prometheus + Grafana in-cluster
 	@echo     make k8s-status        Deployment, pod, Service, HPA, IngressRoute
 	@echo     make k8s-load          Jalankan k6 sebagai Job - memicu HPA
 	@echo     make k8s-logs          Log semua pod backend
@@ -285,7 +287,21 @@ k8s-up:
 k8s-down:
 	kubectl --context $(K8S_CONTEXT) delete -k k8s/overlays/local --ignore-not-found
 
-k8s-bootstrap: k8s-cluster k8s-ingress k8s-image k8s-up
+# Monitoring in-cluster. ConfigMap Grafana dibuat dari folder monitoring/
+# (satu sumber dengan Compose), bukan disalin ke YAML.
+k8s-monitoring:
+	kubectl --context $(K8S_CONTEXT) create namespace $(K8S_MONITORING_NAMESPACE) --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) create configmap grafana-provisioning --from-file=prometheus.yml=monitoring/grafana/provisioning/datasources/prometheus.yml --from-file=lb.yml=monitoring/grafana/provisioning/dashboards/lb.yml --from-file=db.yml=monitoring/grafana/provisioning/dashboards/db.yml --from-file=k6.yml=monitoring/grafana/provisioning/dashboards/k6.yml --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) create configmap grafana-dashboards --from-file=lb-realtime.json=monitoring/grafana/dashboards/lb/lb-realtime.json --from-file=database.json=monitoring/grafana/dashboards/db/database.json --from-file=k6.json=monitoring/grafana/dashboards/k6/k6.json --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
+	kubectl --context $(K8S_CONTEXT) apply -f k8s/monitoring/traefik-metrics.yaml
+	kubectl --context $(K8S_CONTEXT) apply -k k8s/monitoring
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) rollout status deploy/prometheus deploy/grafana --timeout=180s
+
+k8s-monitoring-down:
+	kubectl --context $(K8S_CONTEXT) delete -k k8s/monitoring --ignore-not-found
+	kubectl --context $(K8S_CONTEXT) delete -f k8s/monitoring/traefik-metrics.yaml --ignore-not-found
+
+k8s-bootstrap: k8s-cluster k8s-ingress k8s-image k8s-up k8s-monitoring
 
 k8s-status:
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) get deploy,pods,svc,hpa,ingressroutes

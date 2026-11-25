@@ -12,4 +12,6 @@ resources:
   - backend-deployment.yaml
   - backend-service.yaml
   - backend-hpa.yaml
+  - backend-pdb.yaml
   - backend-ingressroute.yaml
+  - quota.yaml

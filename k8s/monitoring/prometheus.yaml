@@ -1,0 +1,155 @@
+# Prometheus tanpa operator. ServiceMonitor sengaja tidak dipakai: ia butuh
+# Prometheus Operator (CRD + controller + RBAC ekstra), sedangkan yang ingin
+# dipelajari di sini adalah penemuan target lewat Kubernetes API.
+#
+# Target backend ditemukan langsung dari API server (`role: pod`), jadi tidak
+# ada daftar pod di file konfigurasi - padanan docker_sd_configs di Compose.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-discovery
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-discovery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-discovery
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      evaluation_interval: 5s
+
+    scrape_configs:
+      # Satu target per pod backend yang Ready. Label `server` memakai nama pod,
+      # jadi dashboard yang sama dengan Compose tetap menampilkan identitas.
+      - job_name: backend
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [lb-demo]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            regex: backend
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            regex: "3000"
+            action: keep
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: server
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+
+      # Metrik Traefik (entrypoint "metrics" port 9100). Service terpisah dibuat
+      # di traefik-metrics.yaml karena Service utama hanya membuka 80/443.
+      - job_name: traefik
+        static_configs:
+          - targets: ["traefik-metrics.traefik.svc.cluster.local:9100"]
+            labels:
+              component: traefik
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.16.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=3d
+          ports:
+            - name: http
+              containerPort: 9090
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: prometheus-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http

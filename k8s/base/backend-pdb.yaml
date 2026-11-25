@@ -1,0 +1,17 @@
+# Saat node di-drain (mis. upgrade k3s), Kubernetes harus mengusir pod satu per
+# satu. minAvailable 3 dari 5/10 pod memastikan eviction tidak menghabiskan
+# seluruh kapasitas sekaligus.
+#
+# Uji: kubectl -n lb-demo drain k3d-lb-k8s-agent-1 --ignore-daemonsets
+# (setelah selesai: kubectl -n lb-demo uncordon ...).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: backend
