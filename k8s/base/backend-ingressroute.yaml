@@ -1,0 +1,49 @@
+# Padanan label Traefik di Compose, tetapi lewat CRD:
+# - Middleware retry = traefik.http.middlewares.demo-retry
+# - ServersTransport = serversTransport.forwardingTimeouts di traefik.yml
+# - IngressRoute = router "demo" + service "demo"
+#
+# Akses: http://server.localhost:8080 (port 8080 milik k3d, bukan 80 Compose).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: backend-retry
+  labels:
+    app: backend
+spec:
+  retry:
+    attempts: 3
+    initialInterval: 100ms
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: backend-transport
+  labels:
+    app: backend
+spec:
+  forwardingTimeouts:
+    # Sama dengan docker/traefik/traefik.yml: gagal cepat lalu diulang ke pod
+    # lain, bukan menggantung menunggu pod yang sudah mati.
+    dialTimeout: 2s
+    responseHeaderTimeout: 2s
+    idleConnTimeout: 30s
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`server.localhost`)
+      kind: Rule
+      middlewares:
+        - name: backend-retry
+      services:
+        - name: backend
+          port: 80
+          serversTransport: backend-transport

@@ -1,0 +1,52 @@
+# k6 sebagai Job: sekali jalan, selesai, lalu bisa dibaca lognya.
+# ConfigMap `k6-scripts` dibuat oleh `make k8s-load` dari folder k6/ — bukan
+# disalin ke dalam manifest, supaya skrip uji tetap satu sumber.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load
+  labels:
+    app: k6
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: k6
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:2.4.0
+          args: ["run", "/scripts/load-test.js"]
+          env:
+            # Service internal: menguji load balancing Kubernetes, bukan ingress.
+            - name: BASE_URL
+              value: "http://backend"
+            - name: RATE
+              value: "100"
+            - name: DURATION
+              value: "30s"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: k6-scripts
+            items:
+              - key: load-test.js
+                path: load-test.js
+              # load-test.js mengimpor ./lib/backend-counters.js, jadi struktur
+              # foldernya harus dipertahankan.
+              - key: backend-counters.js
+                path: lib/backend-counters.js

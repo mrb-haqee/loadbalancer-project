@@ -1,0 +1,11 @@
+# Overlay untuk mesin lokal. Base sengaja tidak menyebut tag image, supaya
+# overlay lain (mis. `prod`) bisa memakai tag rilis tanpa menyentuh base.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+images:
+  - name: lb-backend
+    newTag: dev

@@ -109,3 +109,57 @@ _Avoid_: Recovery, repair
 **Split Brain**:
 Keadaan terlarang ketika lebih dari satu node di dalam cluster sama-sama menerima penulisan sehingga membentuk dua riwayat data yang saling bertentangan.
 _Avoid_: Dual master
+
+## Orkestrasi (Jalur Kubernetes)
+
+**Orkestrasi**:
+Pengelolaan otomatis siklus hidup banyak instance aplikasi — penjadwalan, penggantian, penambahan, dan pengurangan — berdasarkan keadaan yang diinginkan, bukan perintah manual per container.
+_Avoid_: Automasi Docker, clusterisasi
+
+**Cluster**:
+Kumpulan Node yang dikelola satu control plane dan menerima manifest yang sama.
+_Avoid_: Server, host
+
+**Node**:
+Mesin yang menjalankan Pod. Di jalur belajar ini satu Node adalah satu container Docker yang dibuat k3d, bukan mesin fisik terpisah.
+_Avoid_: Server, VM
+
+**Pod**:
+Unit terkecil yang dijadwalkan Kubernetes: satu atau lebih container yang berbagi network dan lifecycle. Pada project ini satu Pod = satu Backend.
+_Avoid_: Container, instance
+
+**Deployment**:
+Controller yang menjaga jumlah Pod sesuai `replicas` dan mengganti Pod yang mati atau saat rollout. Di sini satu Deployment berisi lima replika, menggantikan lima service Compose.
+_Avoid_: Service, replica set
+
+**Service**:
+Nama DNS stabil dan pembagi trafik layer-4 ke sekumpulan Pod yang cocok dengan selector-nya, meskipun IP Pod terus berubah.
+_Avoid_: Load balancer, ingress
+
+**IngressRoute**:
+Aturan routing HTTP milik Traefik (CRD) yang memetakan host/path ke Service, termasuk middleware dan transport.
+_Avoid_: Ingress, router
+
+**Readiness**:
+Status apakah sebuah Pod siap menerima trafik. Pod yang gagal readiness dikeluarkan dari Service tanpa di-restart. Di sini readiness mengecek database lewat `/ready`.
+_Avoid_: Health check, liveness
+
+**Liveness**:
+Status apakah proses di dalam Pod masih hidup. Kegagalan liveness menyebabkan Pod di-restart. Di sini liveness sengaja hanya memeriksa `/health`, bukan database.
+_Avoid_: Readiness, health check
+
+**HPA (Horizontal Pod Autoscaler)**:
+Controller yang menambah atau mengurangi jumlah Pod berdasarkan metrik (di sini CPU) dibandingkan dengan request resource.
+_Avoid_: Auto-scaling, scale-up
+
+**Job**:
+Workload yang berjalan sampai selesai lalu berhenti, berbeda dari Deployment yang terus menjaga Pod hidup. k6 dijalankan sebagai Job.
+_Avoid_: CronJob, runner
+
+**Kustomize**:
+Alat perakitan manifest: satu `base` generik dengan `overlay` per lingkungan, tanpa templating.
+_Avoid_: Helm, template
+
+**k3d**:
+Pembungkus yang menjalankan cluster k3s (Kubernetes ringan) di dalam container Docker, dipakai agar latihan orkestrasi tidak butuh mesin atau cloud terpisah.
+_Avoid_: Minikube, kind

@@ -1,0 +1,26 @@
+# HPA: 5 pod saat idle, sampai 10 saat CPU rata-rata > 70% dari request.
+# Butuh metrics-server; k3s sudah membawanya. Uji dengan `make k8s-load`.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 5
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      # Jangan langsung mengecil setelah beban turun; beri waktu 60 detik.
+      stabilizationWindowSeconds: 60
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

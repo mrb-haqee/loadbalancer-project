@@ -1,0 +1,21 @@
+# Konfigurasi non-rahasia backend. Nilainya sama dengan x-db-env di
+# docker-compose.yml, kecuali DB_HOST: cluster k3d punya network sendiri,
+# jadi MaxScale dijangkau lewat host (port 4006 dibuka di docker-compose.db.yml).
+# Di Linux tanpa Docker Desktop, ganti host.docker.internal dengan IP gateway
+# Docker dan tambahkan extra_hosts di k3d.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  labels:
+    app: backend
+data:
+  BACKEND_HOST: "0.0.0.0"
+  BACKEND_PORT: "3000"
+  DB_HOST: "host.docker.internal"
+  DB_PORT: "4006"
+  DB_NAME: "lb_demo"
+  DB_USER: "lb_app"
+  DB_CONNECTION_LIMIT: "10"
+  DB_CONNECT_TIMEOUT_MS: "1000"
+  LOG_LEVEL: "info"

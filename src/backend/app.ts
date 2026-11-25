@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { Elysia } from 'elysia';
 import { createLogger } from '../shared/logger';
-import { closeDb, databaseTarget } from './db';
+import { closeDb, databaseTarget, getDb } from './db';
 import { renderDbMetrics } from './db-metrics';
 import { driverErrorCode, isConnectionFailure } from './db-errors';
 import {
@@ -154,7 +154,7 @@ export function createApp(servers: ServerRepository = defaultRepository) {
     .onRequest(({ request, set }) => {
       set.headers['x-served-by'] = self.id;
       const path = new URL(request.url).pathname;
-      if (path === '/health' || path === '/metrics') return;
+      if (path === '/health' || path === '/ready' || path === '/metrics') return;
       requestCount += 1;
       requestStartedAt.set(request, performance.now());
     })
@@ -185,6 +185,19 @@ export function createApp(servers: ServerRepository = defaultRepository) {
         requestCount,
       }),
     )
+    // Readiness endpoint: beda dengan /health, endpoint ini mengecek database.
+    // Kubernetes memakai hasilnya untuk menentukan apakah pod boleh menerima
+    // trafik (readinessProbe). Liveness sengaja tetap memakai /health supaya
+    // database yang sedang mati tidak membuat pod di-restart berulang kali.
+    .get('/ready', async () => {
+      try {
+        await getDb().$client.unsafe('SELECT 1');
+        return jsonResponse(self.id, 200, { status: 'ready', serverId: self.id, database: databaseTarget() });
+      } catch (error) {
+        log.warn(`readiness gagal: ${(error as Error).message}`);
+        return jsonResponse(self.id, 503, { status: 'not_ready', serverId: self.id, database: databaseTarget() });
+      }
+    })
     // Endpoint metrics Prometheus: juga tidak dihitung sebagai trafik aplikasi.
     .get(
       '/metrics',

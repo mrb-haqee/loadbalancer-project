@@ -17,6 +17,15 @@ COMPOSE_TRAEFIK := docker compose -p lb-traefik -f docker-compose.traefik.yml
 COMPOSE_DEMO    := docker compose -p lb-demo -f docker-compose.yml
 COMPOSE_K6      := docker compose -p lb-k6 -f docker-compose.monitoring.yml
 
+# Jalur belajar Kubernetes. Cluster dan namespace sengaja terpisah dari
+# Compose; port host 8080 supaya Traefik Compose (:80) tetap bisa hidup.
+K8S_CLUSTER   ?= lb-k8s
+K8S_CONTEXT   ?= k3d-$(K8S_CLUSTER)
+K8S_NAMESPACE ?= lb-demo
+K8S_IMAGE     ?= lb-backend:dev
+K8S_TRAEFIK_CHART   ?= 39.0.7
+K8S_TRAEFIK_IMAGE   ?= traefik:v3.6.6
+
 # Parameter uji CRUD acak; bisa dioverride dari command line, mis.
 # make crud-load COUNT=500 USERS=20 MODE=create KEEP=1
 COUNT  ?= 100
@@ -43,7 +52,9 @@ MAKEFLAGS += --no-print-directory
 	k6-up k6-run k6-watch k6-down k6-logs \
 	stack stack-up stack-down clean \
 	test test-backend test-docker test-db crud-load \
-	k6-install k6 k6-load k6-failover
+	k6-install k6 k6-load k6-failover \
+	k8s-cluster k8s-ingress k8s-image k8s-up k8s-down k8s-bootstrap \
+	k8s-status k8s-logs k8s-load k8s-smoke k8s-destroy
 
 help:
 	@echo Daftar target Makefile:
@@ -89,6 +100,15 @@ help:
 	@echo     make k6                Cek versi k6 yang terpasang
 	@echo     make k6-load          100 req/detik selama 15 detik
 	@echo     make k6-failover      50 req/detik selama 40 detik - untuk uji failover
+	@echo   Kubernetes - belajar orkestrasi, port 8080:
+	@echo     make k8s-bootstrap     Buat cluster k3d + Traefik + image + manifest
+	@echo     make k8s-up            Terapkan manifest saja
+	@echo     make k8s-status        Deployment, pod, Service, HPA, IngressRoute
+	@echo     make k8s-load          Jalankan k6 sebagai Job - memicu HPA
+	@echo     make k8s-logs          Log semua pod backend
+	@echo     make k8s-smoke         GET http://server.localhost:8080 lewat ingress
+	@echo     make k8s-down          Hapus resource Kubernetes - cluster tetap
+	@echo     make k8s-destroy       Hapus cluster k3d seluruhnya
 
 # --- network bersama -------------------------------------------------------
 
@@ -210,7 +230,7 @@ test-backend:
 	$(BUN) test test/backend
 
 test-db:
-	$(NODE) --test --test-reporter=spec test/docker/db-failover.test.js
+	$(NODE) --test --test-reporter=spec test/docker/db-failover.test.js test/docker/alert-rules.test.js
 
 # Uji CRUD acak lewat load balancer (butuh stack hidup). Data dibersihkan lagi
 # di akhir kecuali KEEP=1. Mode: full (POST/GET/PUT/GET/DELETE/GET 404) atau
@@ -231,4 +251,60 @@ k6-load:
 
 k6-failover:
 	$(BUN) scripts/k6.js run k6/failover.js -e DURATION=40s
+
+# --- Kubernetes (jalur belajar orkestrasi) ---------------------------------
+#
+# Berdampingan dengan Compose, bukan menggantikannya: Traefik Compose tetap di
+# port 80, Traefik k8s di port 8080. Cluster punya network sendiri, jadi pod
+# menjangkau MaxScale lewat `host.docker.internal:4006` (port host dibuka oleh
+# docker-compose.db.yml). Dokumentasi lengkap: docs/kubernetes.md
+
+k8s-cluster:
+	k3d cluster create --config k8s/cluster/k3d-config.yaml
+
+# Image Traefik di-import dulu ke node: Docker Hub menolak sebagian layer
+# Traefik 3.8 di mesin ini, dan `k3d image import` rusak (lihat
+# scripts/k8s-image.js). Chart 39 + image 3.6.6 = versi yang sama dengan
+# stack Compose.
+k8s-ingress:
+	docker image inspect $(K8S_TRAEFIK_IMAGE) >/dev/null 2>&1 || docker pull $(K8S_TRAEFIK_IMAGE)
+	$(BUN) scripts/k8s-image.js $(K8S_TRAEFIK_IMAGE) --cluster $(K8S_CLUSTER)
+	helm repo add traefik https://traefik.github.io/charts --force-update
+	helm repo update traefik
+	helm upgrade --install traefik traefik/traefik --version $(K8S_TRAEFIK_CHART) --namespace traefik --create-namespace --values k8s/cluster/traefik-values.yaml --wait
+
+k8s-image:
+	docker build -f docker/backend.Dockerfile -t $(K8S_IMAGE) .
+	$(BUN) scripts/k8s-image.js $(K8S_IMAGE) --cluster $(K8S_CLUSTER)
+	-kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) rollout restart deploy/backend
+	-kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) rollout status deploy/backend --timeout=120s
+
+k8s-up:
+	kubectl --context $(K8S_CONTEXT) apply -k k8s/overlays/local
+
+k8s-down:
+	kubectl --context $(K8S_CONTEXT) delete -k k8s/overlays/local --ignore-not-found
+
+k8s-bootstrap: k8s-cluster k8s-ingress k8s-image k8s-up
+
+k8s-status:
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) get deploy,pods,svc,hpa,ingressroutes
+
+k8s-logs:
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) logs -l app=backend --tail=50 --prefix=true
+
+# ConfigMap dibuat dari folder k6/ (bukan disalin ke manifest), lalu Job
+# dijalankan ulang. `kubectl wait` membuat make berhenti kalau k6 gagal.
+k8s-load:
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) create configmap k6-scripts --from-file=load-test.js=k6/load-test.js --from-file=backend-counters.js=k6/lib/backend-counters.js --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) delete job k6-load --ignore-not-found
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) apply -f k8s/jobs/k6-load-job.yaml
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) wait --for=condition=complete job/k6-load --timeout=180s
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) logs job/k6-load
+
+k8s-smoke:
+	curl -s -H "Host: server.localhost" http://127.0.0.1:8080/
+
+k8s-destroy:
+	k3d cluster delete $(K8S_CLUSTER)
 

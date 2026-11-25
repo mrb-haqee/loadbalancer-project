@@ -17,6 +17,8 @@ Empat project compose terpisah, semuanya berbagi network `lb-net`:
 
 Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diberi label dan menempel di `lb-net` otomatis dapat URL. Grafana dan web dashboard k6 karena itu bisa dibuka lewat `grafana.localhost` dan `k6.localhost`, bukan hanya lewat port. MariaDB dan exporter-nya tetap tanpa rute Traefik: yang dibuka hanya dashboard-nya.
 
+> **Jalur belajar Kubernetes (opsional).** Selain Compose, ada jalur kedua di [`k8s/`](k8s/) untuk mempelajari orkestrasi dengan beban kerja yang sama: k3d 1 server + 2 agent, Traefik `IngressRoute`, 5 replika dalam satu `Deployment`, readiness/liveness probe, rolling update, HPA, dan k6 sebagai `Job`. Jalur ini **tidak menggantikan** Compose dan berjalan di port **8080**. Mulai dari [`docs/kubernetes.md`](docs/kubernetes.md); alasan dan trade-off-nya di [`docs/adr/0016-kubernetes-learning-track.md`](docs/adr/0016-kubernetes-learning-track.md).
+
 > Sebelumnya ada varian load balancer yang ditulis sendiri di Node.js. Varian itu **sudah dihapus** dari project ini karena yang dipakai hanya versi container. Catatan sejarahnya tetap ada di [`docs/adr/`](docs/adr/).
 
 ## URL
@@ -121,10 +123,16 @@ loadBalancer/
 │   ├── grafana/dashboards/lb/    # lb-realtime.json (trafik nyata)
 │   ├── grafana/dashboards/db/    # database.json (MariaDB + log)
 │   └── reports/                  # hasil ekspor report.html dari k6 web dashboard
+├── k8s/                          # jalur belajar Kubernetes - berdampingan, port 8080
+│   ├── cluster/                  # konfigurasi k3d + values chart Traefik
+│   ├── base/                     # Deployment, Service, HPA, IngressRoute, ConfigMap/Secret
+│   ├── overlays/local/           # overlay Kustomize: tag image lokal
+│   └── jobs/k6-load-job.yaml     # k6 sebagai Job
 ├── GLOSSARY.md
 └── docs/
     ├── database-crud.md          # panduan database, API, dan UI CRUD
     ├── database-monitoring.md    # metrik, dashboard, alert, dan log database
+    ├── kubernetes.md             # panduan jalur belajar orkestrasi
     └── adr/                      # catatan keputusan desain
 ```
 
@@ -181,6 +189,27 @@ curl.exe -s -o NUL -w "%{http_code}`n" http://traefik.localhost/dashboard/
 ```
 
 Buka **http://server.localhost/ui** untuk CRUD katalog. Panduan database, skema, API, dan Adminer ada di [`docs/database-crud.md`](docs/database-crud.md).
+
+### Jalur Kubernetes (belajar orkestrasi)
+
+Butuh **k3d** dan **Helm** (lihat [`docs/kubernetes.md`](docs/kubernetes.md) bagian prasyarat). Database tetap di Compose:
+
+```powershell
+make db-up            # MaxScale harus hidup: readiness pod mengecek database
+make k8s-bootstrap    # cluster k3d + Traefik + image + manifest
+make k8s-status
+make k8s-smoke        # GET http://server.localhost:8080 lewat ingress
+make k8s-load         # k6 sebagai Job - memicu HPA
+make k8s-destroy      # hapus cluster k3d; Compose tidak tersentuh
+```
+
+| URL | Arti |
+|---|---|
+| `http://server.localhost:8080/` | Load balancing ke 5 pod backend |
+| `http://server.localhost:8080/ui` | UI katalog (butuh database) |
+| `http://traefik.localhost:8080/dashboard/` | Dashboard Traefik versi Kubernetes |
+
+Port 8080 dipakai supaya Traefik Compose tetap memegang port 80; kedua jalur bisa dibandingkan berdampingan. Panduan lengkap, latihan, dan troubleshooting ada di [`docs/kubernetes.md`](docs/kubernetes.md).
 
 Respons backend menyebut identitas dirinya:
 

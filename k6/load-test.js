@@ -41,7 +41,8 @@ export default function () {
   check(res, {
     'status 200': (r) => r.status === 200,
     'ada header x-served-by': () => server !== '',
-    'identitas backend valid': () => /^(server|backend)-\d+$/.test(server),
+    // Compose memakai `server-1`, Kubernetes memakai nama pod `backend-<hash>-<id>`.
+    'identitas backend valid': () => /^(server|backend)-[a-z0-9-]+$/.test(server),
     'body berisi servedBy': (r) => {
       try {
         return r.json('servedBy') === server;

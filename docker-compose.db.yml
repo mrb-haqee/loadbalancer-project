@@ -148,6 +148,12 @@ services:
       - "--config=/etc/maxscale.cnf"
     volumes:
       - ./docker/maxscale/maxscale.cnf:/etc/maxscale.cnf:ro
+    # Port host hanya untuk jalur belajar Kubernetes: cluster k3d punya
+    # network sendiri, jadi pod menjangkau MaxScale lewat
+    # host.docker.internal:4006. Stack Compose tetap memakai `maxscale:4006`.
+    # Ini membuka database ke LAN mesin ini; jangan diekspos ke internet.
+    ports:
+      - "${MAXSCALE_PORT:-4006}:4006"
     healthcheck:
       test: ["CMD", "maxctrl", "list", "servers"]
       interval: 5s

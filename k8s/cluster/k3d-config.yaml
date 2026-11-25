@@ -1,0 +1,39 @@
+# Cluster belajar: 1 server + 2 agent di dalam Docker (k3d).
+#
+# Cluster memakai network bawaan k3d (bukan `lb-net`), supaya tidak bercampur
+# dengan jaringan Compose. Database dijangkau lewat `host.docker.internal:4006`
+# — port MaxScale dibuka di host khusus untuk jalur belajar ini.
+#
+# Port host 8080/8443 dipakai, bukan 80/443, supaya stack Compose (Traefik :80)
+# tetap bisa hidup berdampingan. URL k8s: http://server.localhost:8080
+#
+# Traefik bawaan k3s dimatikan; ingress dipasang sendiri lewat chart resmi
+# (`make k8s-ingress`) agar langkahnya terlihat.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: lb-k8s
+servers: 1
+agents: 2
+# k3s 1.33+ (termasuk 1.35 bawaan k3d 5.9) menolak berjalan di cgroup v1, dan
+# Docker Desktop di mesin ini masih v1. 1.32 masih mendukungnya dan cukup untuk
+# latihan. Naikkan versi ini setelah Docker Desktop memakai cgroup v2.
+image: rancher/k3s:v1.32.9-k3s1
+# Tanpa ini k3d menulis kubeconfig dengan host.docker.internal, yang di Windows
+# bisa resolve ke IP LAN dan tidak menjawab. 127.0.0.1 selalu bisa.
+kubeAPI:
+  host: "127.0.0.1"
+  hostIP: "127.0.0.1"
+ports:
+  - port: 8080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 8443:443
+    nodeFilters:
+      - loadbalancer
+options:
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*

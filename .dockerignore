@@ -6,6 +6,7 @@ docs
 scripts
 k6
 tools
+k8s
 *.log
 *.md
 docker-compose*.yml

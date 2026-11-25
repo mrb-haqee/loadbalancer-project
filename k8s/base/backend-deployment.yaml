@@ -1,0 +1,97 @@
+# Satu Deployment dengan 5 replika — pengganti lima service server-1..server-5
+# di Compose. Identitas tiap replika diambil dari nama pod lewat Downward API,
+# jadi tidak perlu mendaftar server satu per satu.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  replicas: 5
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 120
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Tambah satu pod baru sebelum mematikan yang lama: tidak ada kapasitas
+      # yang hilang saat rollout.
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      # preStop 3 detik + shutdown aplikasi (maks 2 detik) harus selesai
+      # sebelum SIGKILL.
+      terminationGracePeriodSeconds: 15
+      # Sebarkan 5 pod ke 3 node. ScheduleAnyway: kalau node kurang, pod tetap
+      # jalan (tidak Pending) — pelajaran: hard constraint bisa mengunci deploy.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: backend
+      containers:
+        - name: backend
+          image: lb-backend:latest
+          # Image di-import langsung ke cluster (`make k8s-image`), bukan ditarik
+          # dari registry.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secret
+          env:
+            - name: BACKEND_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # startup: beri waktu proses Bun siap, tanpa menghukum container cepat.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 15
+          # readiness: hanya pod yang bisa mencapai database yang menerima
+          # trafik. Kalau DB mati, pod dikeluarkan dari Service (bukan restart).
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          # liveness: sengaja /health (tanpa DB). Database mati bukan alasan
+          # me-restart pod; itu tugas readiness.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                # Beri waktu endpoint controller mencabut pod ini dari Service
+                # sebelum proses menerima SIGTERM.
+                command: ["sleep", "3"]

@@ -1,0 +1,43 @@
+# Values chart resmi Traefik (chart 39.x, Traefik 3.6) untuk cluster belajar.
+#
+# Chart 43/Traefik 3.8 tidak dipakai karena layer image-nya gagal diunduh di
+# mesin ini (tls: bad record MAC). Versi 3.6.6 sudah ada lokal untuk Compose,
+# jadi di-import ke cluster dan dipakai ulang di sini.
+#
+# Yang sengaja dibuat mirip docker/traefik/traefik.yml:
+# - dashboard aktif di http://traefik.localhost:8080/dashboard/
+# - access log hanya mencatat 4xx/5xx atau request >= 500 ms
+# - metrik Prometheus dengan bucket yang sama
+#
+# Bedanya: provider-nya Kubernetes CRD (IngressRoute), bukan Docker label.
+image:
+  tag: v3.6.6
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer
+
+ingressRoute:
+  dashboard:
+    enabled: true
+    matchRule: Host(`traefik.localhost`)
+    entryPoints:
+      - web
+
+logs:
+  access:
+    enabled: true
+    # Chart 39 memakai nama key huruf kecil di values (statuscodes,
+    # minduration); template-nya yang menerjemahkan ke camelCase Traefik.
+    filters:
+      statuscodes: "400-599"
+      minduration: 500ms
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+    # Chart 39 memakai string berkoma, bukan array YAML.
+    buckets: "0.005,0.01,0.025,0.05,0.1,0.25,0.5,1,2.5"

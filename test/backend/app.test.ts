@@ -7,6 +7,9 @@ process.env.BACKEND_ID = 'server-1';
 process.env.BACKEND_HOST = '127.0.0.1';
 process.env.BACKEND_PORT = '3999';
 process.env.LOG_LEVEL = 'silent';
+// Port 1 dijamin tidak ada listener: /ready harus membalas 503, bukan menggantung.
+process.env.DB_HOST = '127.0.0.1';
+process.env.DB_PORT = '1';
 
 const { createApp } = await import('../../src/backend/app');
 
@@ -60,6 +63,18 @@ test('health menjawab 200, membawa x-served-by, dan tidak dihitung sebagai trafi
   assert.equal(body.status, 'ok');
   assert.equal(body.serverId, 'server-1');
   assert.equal(body.requestCount, 0);
+});
+
+test('ready membalas 503 saat database tidak tersedia dan tidak dihitung sebagai trafik', async () => {
+  const app = appWith();
+  const response = await get(app, '/ready');
+  assert.equal(response.status, 503);
+  const body = await readJson(response);
+  assert.equal(body.status, 'not_ready');
+  assert.equal(body.serverId, 'server-1');
+
+  const health = await readJson(await get(app, '/health'));
+  assert.equal(health.requestCount, 0);
 });
 
 test('echo /halo mengembalikan query dan menambah requestCount', async () => {
