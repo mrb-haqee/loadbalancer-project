@@ -313,8 +313,8 @@ k8s-up:
 
 k8s-down:
 	kubectl --context $(K8S_CONTEXT) delete -k k8s/overlays/local --ignore-not-found
-	kubectl --context $(K8S_CONTEXT) delete -k k8s/db --ignore-not-found
-	kubectl --context $(K8S_CONTEXT) delete -k k8s/monitoring --ignore-not-found
+	$(K8S_KUSTOMIZE) k8s/db | kubectl --context $(K8S_CONTEXT) delete --ignore-not-found -f -
+	$(K8S_KUSTOMIZE) k8s/monitoring | kubectl --context $(K8S_CONTEXT) delete --ignore-not-found -f -
 	kubectl --context $(K8S_CONTEXT) delete -f k8s/monitoring/traefik-metrics.yaml --ignore-not-found
 
 # Monitoring in-cluster. ConfigMap Grafana dibuat dari folder monitoring/
@@ -326,7 +326,7 @@ k8s-monitoring:
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) rollout status deploy/prometheus deploy/grafana --timeout=180s
 
 k8s-monitoring-down:
-	kubectl --context $(K8S_CONTEXT) delete -k k8s/monitoring --ignore-not-found
+	$(K8S_KUSTOMIZE) k8s/monitoring | kubectl --context $(K8S_CONTEXT) delete --ignore-not-found -f -
 	kubectl --context $(K8S_CONTEXT) delete -f k8s/monitoring/traefik-metrics.yaml --ignore-not-found
 
 # cert-manager: CRD + controller. Image di-import dulu karena registry bisa
@@ -376,7 +376,7 @@ k8s-db:
 # PVC `data-mariadb-0` sengaja tidak dihapus: data tetap ada kalau StatefulSet
 # dibuat ulang. Hapus manual kalau ingin mulai dari nol.
 k8s-db-down:
-	kubectl --context $(K8S_CONTEXT) delete -k k8s/db --ignore-not-found
+	$(K8S_KUSTOMIZE) k8s/db | kubectl --context $(K8S_CONTEXT) delete --ignore-not-found -f -
 
 k8s-bootstrap: k8s-cluster k8s-import k8s-ingress k8s-image k8s-db k8s-up k8s-monitoring k8s-cert-manager k8s-tls k8s-argocd k8s-gitops k8s-argocd k8s-gitops
 
