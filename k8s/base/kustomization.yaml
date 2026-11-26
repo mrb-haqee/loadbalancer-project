@@ -14,4 +14,5 @@ resources:
   - backend-hpa.yaml
   - backend-pdb.yaml
   - backend-ingressroute.yaml
+  - http-redirect.yaml
   - quota.yaml

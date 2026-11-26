@@ -37,7 +37,6 @@ metadata:
     app: backend
 spec:
   entryPoints:
-    - web
     - websecure
   # Sertifikat dari cert-manager (k8s/tls/certificates.yaml).
   tls:

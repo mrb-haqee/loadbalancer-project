@@ -22,7 +22,6 @@ metadata:
   namespace: argocd
 spec:
   entryPoints:
-    - web
     - websecure
   tls:
     secretName: argocd-tls

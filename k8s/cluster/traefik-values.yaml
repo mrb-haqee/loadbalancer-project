@@ -10,6 +10,10 @@
 # - metrik Prometheus dengan bucket yang sama
 #
 # Bedanya: provider-nya Kubernetes CRD (IngressRoute), bukan Docker label.
+#
+# Catatan: IngressRoute yang punya `tls` membuat router-nya bertipe TLS, jadi
+# router itu HANYA cocok pada koneksi websecure. Redirect HTTP -> HTTPS
+# dikerjakan router terpisah di k8s/base/http-redirect.yaml.
 image:
   tag: v3.6.6
   pullPolicy: IfNotPresent
@@ -21,8 +25,10 @@ ingressRoute:
   dashboard:
     enabled: true
     matchRule: Host(`traefik.localhost`)
+    # Dashboard ikut di HTTPS. Tanpa tls.secretName ia memakai sertifikat
+    # default Traefik; cukup untuk melihat router dan service.
     entryPoints:
-      - web
+      - websecure
 
 logs:
   access:

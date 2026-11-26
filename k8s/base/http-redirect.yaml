@@ -1,0 +1,38 @@
+# Redirect HTTP -> HTTPS untuk semua host *.localhost jalur belajar.
+#
+# Kenapa bukan `entryPoints.web.http.redirections`: redirect di level entrypoint
+# menunjuk ke port websecure (443), sedangkan jalur k8s ini terbuka di port host
+# 18443. Middleware `redirectScheme` bisa menyebut port eksplisit.
+#
+# Router ini memakai HostRegexp supaya satu resource cukup untuk server,
+# grafana, prometheus, dan argocd. Router HTTPS-nya ada di masing-masing
+# IngressRoute (hanya entryPoint websecure).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: https-redirect
+  namespace: lb-demo
+spec:
+  redirectScheme:
+    scheme: https
+    port: "18443"
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: http-redirect
+  namespace: lb-demo
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: HostRegexp(`^[a-zA-Z0-9-]+\.localhost$`)
+      kind: Rule
+      middlewares:
+        - name: https-redirect
+      # Service tidak pernah dipanggil: middleware redirect menghentikan
+      # request lebih dulu. Traefik tetap butuh referensi service.
+      services:
+        - name: backend
+          port: 80

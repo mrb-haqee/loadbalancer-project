@@ -131,7 +131,6 @@ metadata:
     app: grafana
 spec:
   entryPoints:
-    - web
     - websecure
   tls:
     secretName: monitoring-tls
@@ -150,7 +149,6 @@ metadata:
     app: prometheus
 spec:
   entryPoints:
-    - web
     - websecure
   tls:
     secretName: monitoring-tls
