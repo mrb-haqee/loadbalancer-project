@@ -71,10 +71,12 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi
+            # 512Mi terlalu kecil: page cache PVC ikut dihitung cgroup, dan
+            # MariaDB OOMKilled saat InnoDB memuat ulang. 1Gi cukup lega.
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 1Gi
           # Startup memberi waktu inisialisasi skema pada PVC kosong.
           startupProbe:
             tcpSocket:
