@@ -18,7 +18,8 @@ COMPOSE_DEMO    := docker compose -p lb-demo -f docker-compose.yml
 COMPOSE_K6      := docker compose -p lb-k6 -f docker-compose.monitoring.yml
 
 # Jalur belajar Kubernetes. Cluster dan namespace sengaja terpisah dari
-# Compose; port host 8080 supaya Traefik Compose (:80) tetap bisa hidup.
+# Compose; port host 18080 supaya Traefik Compose (:80) tetap bisa hidup.
+# (8080 di mesin ini dipakai container lain, traefik-traefik-1.)
 K8S_CLUSTER   ?= lb-k8s
 K8S_CONTEXT   ?= k3d-$(K8S_CLUSTER)
 K8S_NAMESPACE ?= lb-demo
@@ -26,6 +27,9 @@ K8S_MONITORING_NAMESPACE ?= monitoring
 K8S_IMAGE     ?= lb-backend:dev
 K8S_TRAEFIK_CHART   ?= 39.0.7
 K8S_TRAEFIK_IMAGE   ?= traefik:v3.6.6
+# Image pihak ketiga yang sudah ada di Docker host. Di-import sekali supaya
+# tidak bergantung pada pull dari registry saat pod pertama kali jalan.
+K8S_IMAGES ?= traefik:v3.6.6 prom/prometheus:v3.16.0 grafana/grafana:13.3.1 mariadb:11.4 mariadb/maxscale:24.02.9 prom/mysqld-exporter:v0.17.2 grafana/k6:2.4.0
 
 # Parameter uji CRUD acak; bisa dioverride dari command line, mis.
 # make crud-load COUNT=500 USERS=20 MODE=create KEEP=1
@@ -54,8 +58,8 @@ MAKEFLAGS += --no-print-directory
 	stack stack-up stack-down clean \
 	test test-backend test-docker test-db crud-load \
 	k6-install k6 k6-load k6-failover \
-	k8s-cluster k8s-ingress k8s-image k8s-up k8s-down k8s-bootstrap \
-	k8s-status k8s-logs k8s-load k8s-smoke k8s-destroy k8s-monitoring k8s-monitoring-down
+	k8s-cluster k8s-import k8s-ingress k8s-image k8s-up k8s-down k8s-bootstrap \
+	k8s-status k8s-logs k8s-load k8s-smoke k8s-destroy k8s-monitoring k8s-monitoring-down k8s-db k8s-db-down
 
 help:
 	@echo Daftar target Makefile:
@@ -101,14 +105,16 @@ help:
 	@echo     make k6                Cek versi k6 yang terpasang
 	@echo     make k6-load          100 req/detik selama 15 detik
 	@echo     make k6-failover      50 req/detik selama 40 detik - untuk uji failover
-	@echo   Kubernetes - belajar orkestrasi, port 8080:
+	@echo   Kubernetes - belajar orkestrasi, port 18080:
 	@echo     make k8s-bootstrap     Buat cluster k3d + Traefik + image + manifest + monitoring
 	@echo     make k8s-up            Terapkan manifest saja
+	@echo     make k8s-import        Impor image pihak ketiga dari Docker host
+	@echo     make k8s-db            MariaDB + MaxScale di dalam cluster
 	@echo     make k8s-monitoring    Prometheus + Grafana in-cluster
 	@echo     make k8s-status        Deployment, pod, Service, HPA, IngressRoute
 	@echo     make k8s-load          Jalankan k6 sebagai Job - memicu HPA
 	@echo     make k8s-logs          Log semua pod backend
-	@echo     make k8s-smoke         GET http://server.localhost:8080 lewat ingress
+	@echo     make k8s-smoke         GET http://server.localhost:18080 lewat ingress
 	@echo     make k8s-down          Hapus resource Kubernetes - cluster tetap
 	@echo     make k8s-destroy       Hapus cluster k3d seluruhnya
 
@@ -257,12 +263,18 @@ k6-failover:
 # --- Kubernetes (jalur belajar orkestrasi) ---------------------------------
 #
 # Berdampingan dengan Compose, bukan menggantikannya: Traefik Compose tetap di
-# port 80, Traefik k8s di port 8080. Cluster punya network sendiri, jadi pod
+# port 80, Traefik k8s di port 18080. Cluster punya network sendiri, jadi pod
 # menjangkau MaxScale lewat `host.docker.internal:4006` (port host dibuka oleh
 # docker-compose.db.yml). Dokumentasi lengkap: docs/kubernetes.md
 
 k8s-cluster:
 	k3d cluster create --config k8s/cluster/k3d-config.yaml
+
+# Image pihak ketiga (Traefik, Prometheus, Grafana, MariaDB, MaxScale, exporter,
+# k6) di-import dari Docker host. `make k8s-image` khusus image backend yang
+# dibangun dari repo ini.
+k8s-import:
+	$(BUN) scripts/k8s-image.js $(K8S_IMAGES) --cluster $(K8S_CLUSTER)
 
 # Image Traefik di-import dulu ke node: Docker Hub menolak sebagian layer
 # Traefik 3.8 di mesin ini, dan `k3d image import` rusak (lihat
@@ -286,6 +298,9 @@ k8s-up:
 
 k8s-down:
 	kubectl --context $(K8S_CONTEXT) delete -k k8s/overlays/local --ignore-not-found
+	kubectl --context $(K8S_CONTEXT) delete -k k8s/db --ignore-not-found
+	kubectl --context $(K8S_CONTEXT) delete -k k8s/monitoring --ignore-not-found
+	kubectl --context $(K8S_CONTEXT) delete -f k8s/monitoring/traefik-metrics.yaml --ignore-not-found
 
 # Monitoring in-cluster. ConfigMap Grafana dibuat dari folder monitoring/
 # (satu sumber dengan Compose), bukan disalin ke YAML.
@@ -295,16 +310,32 @@ k8s-monitoring:
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) create configmap grafana-dashboards --from-file=lb-realtime.json=monitoring/grafana/dashboards/lb/lb-realtime.json --from-file=database.json=monitoring/grafana/dashboards/db/database.json --from-file=k6.json=monitoring/grafana/dashboards/k6/k6.json --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
 	kubectl --context $(K8S_CONTEXT) apply -f k8s/monitoring/traefik-metrics.yaml
 	kubectl --context $(K8S_CONTEXT) apply -k k8s/monitoring
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) rollout restart deploy/prometheus
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) rollout status deploy/prometheus deploy/grafana --timeout=180s
 
 k8s-monitoring-down:
 	kubectl --context $(K8S_CONTEXT) delete -k k8s/monitoring --ignore-not-found
 	kubectl --context $(K8S_CONTEXT) delete -f k8s/monitoring/traefik-metrics.yaml --ignore-not-found
 
-k8s-bootstrap: k8s-cluster k8s-ingress k8s-image k8s-up k8s-monitoring
+# Database in-cluster. ConfigMap init dibuat dari SQL yang juga dipakai Compose
+# (001-schema.sql), ditambah user khas Kubernetes (002-users.sql).
+k8s-db:
+	kubectl --context $(K8S_CONTEXT) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) create configmap mariadb-init --from-file=001-schema.sql=db/init/001-schema.sql --from-file=002-users.sql=k8s/db/002-users.sql --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
+	kubectl --context $(K8S_CONTEXT) apply -k k8s/db
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) rollout status statefulset/mariadb --timeout=240s
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) rollout status deploy/maxscale deploy/mysqld-exporter --timeout=180s
+
+# PVC `data-mariadb-0` sengaja tidak dihapus: data tetap ada kalau StatefulSet
+# dibuat ulang. Hapus manual kalau ingin mulai dari nol.
+k8s-db-down:
+	kubectl --context $(K8S_CONTEXT) delete -k k8s/db --ignore-not-found
+
+k8s-bootstrap: k8s-cluster k8s-import k8s-ingress k8s-image k8s-db k8s-up k8s-monitoring
 
 k8s-status:
-	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) get deploy,pods,svc,hpa,ingressroutes
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) get deploy,statefulset,pods,svc,hpa,ingressroutes
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) get deploy,pods,svc
 
 k8s-logs:
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) logs -l app=backend --tail=50 --prefix=true
@@ -319,7 +350,7 @@ k8s-load:
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) logs job/k6-load
 
 k8s-smoke:
-	curl -s -H "Host: server.localhost" http://127.0.0.1:8080/
+	curl -s -H "Host: server.localhost" http://127.0.0.1:18080/
 
 k8s-destroy:
 	k3d cluster delete $(K8S_CLUSTER)

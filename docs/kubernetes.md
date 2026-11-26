@@ -69,10 +69,10 @@ make db-up
 
 | URL | Arti |
 |---|---|
-| `http://server.localhost:8080/` | Load balancing ke 5 pod backend |
-| `http://server.localhost:8080/ui` | UI katalog (butuh database) |
-| `http://traefik.localhost:8080/dashboard/` | Dashboard Traefik (IngressRoute) |
-| `http://127.0.0.1:8080/` | Butuh header `Host: server.localhost` |
+| `http://server.localhost:18080/` | Load balancing ke 5 pod backend |
+| `http://server.localhost:18080/ui` | UI katalog (butuh database) |
+| `http://traefik.localhost:18080/dashboard/` | Dashboard Traefik (IngressRoute) |
+| `http://127.0.0.1:18080/` | Butuh header `Host: server.localhost` |
 
 Port **8080**, bukan 80: Traefik Compose tetap memegang port 80. Kedua jalur
 bisa hidup bersamaan dan dibandingkan.
@@ -90,7 +90,7 @@ bisa hidup bersamaan dan dibandingkan.
  │  │ monitoring         │             │ HPA 5–10             │ │
  │  └────────────────────┘             └──────────────────────┘ │
  │         ▲                                    ▲               │
- │         └──────────── port 80 ───────────────┴─ port 8080 ───┘
+ │         └──────────── port 80 ───────────────┴─ port 18080 ───┘
  └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -99,7 +99,7 @@ Yang menghubungkannya ke stack Compose:
 
 - `host.docker.internal:4006` → port MaxScale yang dibuka di host;
 - image backend di-import langsung tanpa registry;
-- port host 8080/8443 dipetakan ke Traefik di cluster.
+- port host 18080/18443 dipetakan ke Traefik di cluster.
 
 ## 4. Peta Compose → Kubernetes
 
@@ -138,7 +138,7 @@ Perbedaan yang disengaja:
 ```
 k8s/
 ├── cluster/
-│   ├── k3d-config.yaml          # 1 server + 2 agent, k3s 1.32, port 8080
+│   ├── k3d-config.yaml          # 1 server + 2 agent, k3s 1.32, port 18080
 │   └── traefik-values.yaml      # dashboard, access log, metrik Prometheus
 ├── base/                        # manifest generik
 │   ├── kustomization.yaml
@@ -209,7 +209,7 @@ kubectl -n lb-demo rollout status deploy/backend
 Sambil rollout, jalankan di terminal lain:
 
 ```powershell
-while ($true) { curl.exe -s -o NUL -w "%{http_code}`n" -H "Host: server.localhost" http://127.0.0.1:8080/ }
+while ($true) { curl.exe -s -o NUL -w "%{http_code}`n" -H "Host: server.localhost" http://127.0.0.1:18080/ }
 ```
 
 `maxUnavailable: 0` + `maxSurge: 1` + `preStop` menjaga tidak ada request yang
@@ -233,7 +233,7 @@ Matikan database sementara:
 docker stop lb-db-maxscale-1
 kubectl -n lb-demo get pods -l app=backend -w      # READY 0/1, STATUS Running
 kubectl -n lb-demo get endpoints backend           # kosong
-curl.exe -i -H "Host: server.localhost" http://127.0.0.1:8080/
+curl.exe -i -H "Host: server.localhost" http://127.0.0.1:18080/
 docker start lb-db-maxscale-1
 ```
 
@@ -286,7 +286,7 @@ sebelum menambah kompleksitas.
 |---|---|---|
 | Node `NotReady`, log server berhenti sendiri | k3s 1.33+ di cgroup v1 | pakai `image: rancher/k3s:v1.32.9-k3s1` di `k3d-config.yaml` |
 | `kubectl` → `connection refused` ke `host.docker.internal` | kubeconfig memakai nama host, bukan loopback | `kubeAPI.host: 127.0.0.1` di `k3d-config.yaml`; atau `kubectl config set-cluster k3d-lb-k8s --server=https://127.0.0.1:<port>` |
-| `k3d cluster create` gagal: port dipakai | 8080/8443 sudah dipakai proses lain | ubah `ports` di `k8s/cluster/k3d-config.yaml`, buat ulang cluster |
+| `k3d cluster create` gagal: port dipakai | 18080/18443 sudah dipakai proses lain | ubah `ports` di `k8s/cluster/k3d-config.yaml`, buat ulang cluster |
 | `k3d image import`: `ctr: content digest ... not found` | bug k3d di Windows/Docker Desktop | pakai `bun scripts/k8s-image.js <image>` (dipakai `make k8s-image`) |
 | `docker pull` gagal: `tls: bad record MAC` | registry menolak satu layer | pakai image lokal yang sudah ada (mis. `traefik:v3.6.6`) |
 | Helm: `values don't meet the specifications ... '/service/type'` | values chart 43 dipakai dengan chart 39 | pasangkan `k8s/cluster/traefik-values.yaml` dengan chart 39 |
@@ -313,10 +313,10 @@ Sama seperti stack Compose, ini **hanya untuk lokal**:
 
 - Traefik dashboard tanpa login, API CRUD tanpa autentikasi.
 - Secret disimpan sebagai YAML biasa (password demo yang sama dengan Compose).
-- Tidak ada TLS; port 8080/8443 hanya untuk localhost.
+- Tidak ada TLS; port 118080/18443 hanya untuk localhost.
 - Port 4006 (MaxScale) dibuka di host agar pod bisa menjangkau database. Ini
   terbuka ke LAN mesin, jadi jangan diekspos ke internet.
-- Jangan mengekspos port 8080 ke internet.
+- Jangan mengekspos port 18080 ke internet.
 
 Untuk cluster sungguhan, Secret seperti ini harus diganti SealedSecrets /
 External Secrets, dan dashboard diberi autentikasi.

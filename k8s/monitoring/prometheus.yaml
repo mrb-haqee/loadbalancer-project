@@ -70,6 +70,15 @@ data:
           - targets: ["traefik-metrics.traefik.svc.cluster.local:9100"]
             labels:
               component: traefik
+
+      # Satu exporter untuk MariaDB in-cluster. Label `node` dan `component`
+      # sama dengan dashboard database yang dipakai Compose.
+      - job_name: mariadb
+        static_configs:
+          - targets: ["mysqld-exporter.lb-demo.svc.cluster.local:9104"]
+            labels:
+              component: database
+              node: mariadb
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

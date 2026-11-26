@@ -123,7 +123,7 @@ loadBalancer/
 │   ├── grafana/dashboards/lb/    # lb-realtime.json (trafik nyata)
 │   ├── grafana/dashboards/db/    # database.json (MariaDB + log)
 │   └── reports/                  # hasil ekspor report.html dari k6 web dashboard
-├── k8s/                          # jalur belajar Kubernetes - berdampingan, port 8080
+├── k8s/                          # jalur belajar Kubernetes - berdampingan, port 18080
 │   ├── cluster/                  # konfigurasi k3d + values chart Traefik
 │   ├── base/                     # Deployment, Service, HPA, IngressRoute, ConfigMap/Secret
 │   ├── overlays/local/           # overlay Kustomize: tag image lokal
@@ -198,18 +198,18 @@ Butuh **k3d** dan **Helm** (lihat [`docs/kubernetes.md`](docs/kubernetes.md) bag
 make db-up            # MaxScale harus hidup: readiness pod mengecek database
 make k8s-bootstrap    # cluster k3d + Traefik + image + manifest
 make k8s-status
-make k8s-smoke        # GET http://server.localhost:8080 lewat ingress
+make k8s-smoke        # GET http://server.localhost:18080 lewat ingress
 make k8s-load         # k6 sebagai Job - memicu HPA
 make k8s-destroy      # hapus cluster k3d; Compose tidak tersentuh
 ```
 
 | URL | Arti |
 |---|---|
-| `http://server.localhost:8080/` | Load balancing ke 5 pod backend |
-| `http://server.localhost:8080/ui` | UI katalog (butuh database) |
-| `http://traefik.localhost:8080/dashboard/` | Dashboard Traefik versi Kubernetes |
+| `http://server.localhost:18080/` | Load balancing ke 5 pod backend |
+| `http://server.localhost:18080/ui` | UI katalog (butuh database) |
+| `http://traefik.localhost:18080/dashboard/` | Dashboard Traefik versi Kubernetes |
 
-Port 8080 dipakai supaya Traefik Compose tetap memegang port 80; kedua jalur bisa dibandingkan berdampingan. Panduan lengkap, latihan, dan troubleshooting ada di [`docs/kubernetes.md`](docs/kubernetes.md).
+port 18080 dipakai supaya Traefik Compose tetap memegang port 80; kedua jalur bisa dibandingkan berdampingan. Panduan lengkap, latihan, dan troubleshooting ada di [`docs/kubernetes.md`](docs/kubernetes.md).
 
 Respons backend menyebut identitas dirinya:
 
@@ -485,7 +485,7 @@ Grafana tidak bisa menjalankan perintah sendiri (tidak ada plugin self-hosted un
 Kenapa begini:
 
 - `k6-runner` menjalankan binary k6 langsung di container-nya (image alpine + binary dari image k6). **Tidak** memakai Docker socket — runner tidak bisa membuat/mematikan container lain.
-- Container hanya bisa diakses lewat `trigger.localhost` (Traefik, prioritas 200); port 8080 tidak dipublikasikan ke host.
+- Container hanya bisa diakses lewat `trigger.localhost` (Traefik, prioritas 200); port 18080 tidak dipublikasikan ke host.
 - Endpoint ini **tanpa autentikasi**. Siapa pun yang bisa membuka `trigger.localhost` bisa memulai Run; guard-nya cuma single-flight. Untuk lokal aman, jangan diekspos ke internet tanpa auth.
 - Ganti intensitas: ubah `RATE` / `DURATION` di service `k6-runner` (`docker-compose.monitoring.yml`), lalu `docker compose -p lb-k6 -f docker-compose.monitoring.yml up -d k6-runner`.
 
@@ -666,7 +666,7 @@ Panduan lengkap (skema, contoh `curl`, status code, Adminer, batasan) ada di [`d
 - `make test` hanya menguji jalur HTTP; failover database diuji terpisah oleh `make test-db` karena ia benar-benar mematikan primary.
 - `db/init/001-schema.sql` hanya dijalankan saat volume `lb-db-data` kosong. Perubahan skema pada volume lama butuh `make db-reset`, yang **menghapus data**.
 - `docker.sock` di-mount read-only, tapi tetap memberi akses ke Docker API — hanya untuk demo lokal, jangan diekspos ke internet.
-- Dashboard `api.insecure=true` tanpa login di port 8089 **dan** di `http://traefik.localhost/dashboard/`. Endpoint `/metrics` Traefik juga ikut terbuka di sana (port 8080 tidak dipublikasikan, tapi 8089 memuat API yang sama).
+- Dashboard `api.insecure=true` tanpa login di port 8089 **dan** di `http://traefik.localhost/dashboard/`. Endpoint `/metrics` Traefik juga ikut terbuka di sana (port 18080 tidak dipublikasikan, tapi 8089 memuat API yang sama).
 - Grafana memakai kredensial default `admin/admin` dan viewer anonim. Hanya untuk lokal.
 - Prometheus tanpa autentikasi dan tanpa port publik — hanya bisa diakses dari network `lb-net` / `lb-k6-net`. Retensi 7 hari. Loki juga tanpa auth, tanpa port host, retensi 7 hari.
 - User `lb_exporter` memakai password demo (`lb_exporter_password`) dan punya `PROCESS` + `REPLICATION CLIENT` + `SLAVE MONITOR` pada semua database. Ganti lewat `MARIADB_EXPORTER_PASSWORD` + `make db-grant-users` bila perlu.

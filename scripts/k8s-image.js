@@ -9,7 +9,7 @@
  *   docker save  →  docker cp ke node  →  ctr -n k8s.io images import
  *
  *   bun scripts/k8s-image.js lb-backend:dev
- *   bun scripts/k8s-image.js traefik:v3.6.6 --cluster lb-k8s
+ *   bun scripts/k8s-image.js traefik:v3.6.6 mariadb:11.4 --cluster lb-k8s
  *
  * Image harus sudah ada di Docker host (hasil `docker build` atau `docker
  * pull`). Tanpa registry, ini cara paling sederhana memasukkan image ke k3s.
@@ -35,10 +35,10 @@ for (let index = 0; index < args.length; index += 1) {
   }
 }
 
-const image = positional[0];
+const images = positional;
 
-if (!image) {
-  console.error('Pemakaian: bun scripts/k8s-image.js <image:tag> [--cluster <nama>]');
+if (images.length === 0) {
+  console.error('Pemakaian: bun scripts/k8s-image.js <image:tag> [image:tag ...] [--cluster <nama>]');
   process.exit(1);
 }
 
@@ -84,8 +84,8 @@ const workDir = mkdtempSync(join(tmpdir(), 'k3d-image-'));
 const tarball = join(workDir, 'image.tar');
 
 try {
-  console.log(`Menyimpan ${image} ke tar...`);
-  run('docker', ['save', image, '-o', tarball]);
+  console.log(`Menyimpan ${images.length} image ke tar...`);
+  run('docker', ['save', ...images, '-o', tarball]);
 
   for (const node of nodes) {
     console.log(`Mengimpor ke ${node}...`);
@@ -94,7 +94,7 @@ try {
     run('docker', ['exec', node, 'rm', '-f', '/tmp/k3d-image.tar']);
   }
 
-  console.log(`Selesai: ${image} tersedia di ${nodes.length} node (${cluster}).`);
+  console.log(`Selesai: ${images.length} image tersedia di ${nodes.length} node (${cluster}).`);
 } finally {
   rmSync(workDir, { recursive: true, force: true });
 }

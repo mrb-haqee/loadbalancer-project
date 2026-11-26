@@ -4,8 +4,8 @@
 # dengan jaringan Compose. Database dijangkau lewat `host.docker.internal:4006`
 # — port MaxScale dibuka di host khusus untuk jalur belajar ini.
 #
-# Port host 8080/8443 dipakai, bukan 80/443, supaya stack Compose (Traefik :80)
-# tetap bisa hidup berdampingan. URL k8s: http://server.localhost:8080
+# Port host 18080/18443 dipakai, bukan 80/443, supaya stack Compose (Traefik :80)
+# tetap bisa hidup berdampingan. URL k8s: http://server.localhost:18080
 #
 # Traefik bawaan k3s dimatikan; ingress dipasang sendiri lewat chart resmi
 # (`make k8s-ingress`) agar langkahnya terlihat.
@@ -25,10 +25,10 @@ kubeAPI:
   host: "127.0.0.1"
   hostIP: "127.0.0.1"
 ports:
-  - port: 8080:80
+  - port: 18080:80
     nodeFilters:
       - loadbalancer
-  - port: 8443:443
+  - port: 18443:443
     nodeFilters:
       - loadbalancer
 options:

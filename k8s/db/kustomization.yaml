@@ -1,0 +1,17 @@
+# Fase 3: database pindah ke dalam cluster.
+#
+# Compose tetap punya database sendiri (docker-compose.db.yml) dan tidak
+# tersentuh. Yang berubah hanya backend Kubernetes: DB_HOST sekarang menunjuk
+# Service `maxscale` di namespace ini, bukan host.docker.internal.
+#
+# ConfigMap `mariadb-init` dibuat `make k8s-db` dari:
+#   db/init/001-schema.sql + k8s/db/002-users.sql
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lb-demo
+
+resources:
+  - mariadb.yaml
+  - maxscale.yaml
+  - exporter.yaml

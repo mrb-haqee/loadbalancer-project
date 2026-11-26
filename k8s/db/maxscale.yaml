@@ -1,0 +1,116 @@
+# MaxScale tetap menjadi satu-satunya pintu database untuk backend.
+#
+# Di Compose ia merutekan ke tiga node + failover. Di fase 3 hanya ada satu
+# node MariaDB (StatefulSet), jadi router tetap `readconnroute` tetapi
+# auto_failover dimatikan - tidak ada replika untuk dipromosikan. Yang penting
+# dipertahankan: aplikasi tetap bicara ke `maxscale:4006`, bukan ke MariaDB.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maxscale-config
+data:
+  maxscale.cnf: |
+    [maxscale]
+    threads=auto
+    log_info=false
+    log_warning=true
+    log_notice=true
+
+    [mariadb]
+    type=server
+    address=mariadb
+    port=3306
+    protocol=MariaDBBackend
+
+    [mariadb-monitor]
+    type=monitor
+    module=mariadbmon
+    servers=mariadb
+    user=lb_monitor
+    password=lb_monitor_password
+    monitor_interval=2000ms
+    auto_failover=false
+    auto_rejoin=false
+    backend_connect_timeout=2s
+
+    [db-service]
+    type=service
+    router=readconnroute
+    router_options=master
+    servers=mariadb
+    user=lb_app
+    password=lb_app_password
+
+    [db-listener]
+    type=listener
+    service=db-service
+    protocol=MariaDBClient
+    port=4006
+    address=0.0.0.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maxscale
+  labels:
+    app: maxscale
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: maxscale
+  template:
+    metadata:
+      labels:
+        app: maxscale
+    spec:
+      containers:
+        - name: maxscale
+          image: mariadb/maxscale:24.02.9
+          imagePullPolicy: IfNotPresent
+          args:
+            - maxscale
+            - -U
+            - maxscale
+            - --nodaemon
+            - --log=stdout
+            - --config=/etc/maxscale.cnf
+          ports:
+            - name: mysql
+              containerPort: 4006
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: mysql
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/maxscale.cnf
+              subPath: maxscale.cnf
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: maxscale-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: maxscale
+  labels:
+    app: maxscale
+spec:
+  selector:
+    app: maxscale
+  ports:
+    - name: mysql
+      port: 4006
+      targetPort: mysql

@@ -1,8 +1,7 @@
-# Konfigurasi non-rahasia backend. Nilainya sama dengan x-db-env di
-# docker-compose.yml, kecuali DB_HOST: cluster k3d punya network sendiri,
-# jadi MaxScale dijangkau lewat host (port 4006 dibuka di docker-compose.db.yml).
-# Di Linux tanpa Docker Desktop, ganti host.docker.internal dengan IP gateway
-# Docker dan tambahkan extra_hosts di k3d.
+# Konfigurasi non-rahasia backend. Sejak fase 3, database berjalan di dalam
+# cluster (MariaDB StatefulSet + MaxScale), jadi backend memakai Service
+# `maxscale` - bukan lagi host.docker.internal. Stack Compose tetap memakai
+# database Compose sendiri dan tidak terpengaruh.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,7 +11,7 @@ metadata:
 data:
   BACKEND_HOST: "0.0.0.0"
   BACKEND_PORT: "3000"
-  DB_HOST: "host.docker.internal"
+  DB_HOST: "maxscale"
   DB_PORT: "4006"
   DB_NAME: "lb_demo"
   DB_USER: "lb_app"

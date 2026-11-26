@@ -3,7 +3,7 @@
 # - ServersTransport = serversTransport.forwardingTimeouts di traefik.yml
 # - IngressRoute = router "demo" + service "demo"
 #
-# Akses: http://server.localhost:8080 (port 8080 milik k3d, bukan 80 Compose).
+# Akses: http://server.localhost:18080 (port 18080 milik k3d, bukan 80 Compose).
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:

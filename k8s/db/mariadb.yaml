@@ -1,0 +1,112 @@
+# MariaDB sebagai StatefulSet: satu pod, satu PVC, satu nama stabil.
+#
+# Bedanya dengan Compose: di sini "state" tidak lagi di volume Docker host,
+# tetapi di PersistentVolume yang diikat ke pod lewat volumeClaimTemplates.
+# Karena hanya satu node database, replikasi & failover (yang jadi inti
+# docker-compose.db.yml) tidak dicoba diulang - itu justru alasan MaxScale
+# tetap dipertahankan sebagai pintu masuk, bukan diganti readwritesplit.
+#
+# Skema dan user dijalankan sekali dari ConfigMap `mariadb-init` yang dibuat
+# `make k8s-db` dari db/init/001-schema.sql + k8s/db/002-users.sql.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mariadb
+  labels:
+    app: mariadb
+type: Opaque
+stringData:
+  MARIADB_ROOT_PASSWORD: "lb_root_password"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  labels:
+    app: mariadb
+spec:
+  # Headless: DNS `mariadb` menunjuk langsung ke pod, tanpa ClusterIP.
+  # Ini yang dipakai MaxScale dan exporter sebagai alamat server.
+  clusterIP: None
+  selector:
+    app: mariadb
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+  labels:
+    app: mariadb
+spec:
+  serviceName: mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: mariadb
+          image: mariadb:11.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MARIADB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb
+                  key: MARIADB_ROOT_PASSWORD
+            - name: MARIADB_DATABASE
+              value: lb_demo
+          ports:
+            - name: mysql
+              containerPort: 3306
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # Startup memberi waktu inisialisasi skema pada PVC kosong.
+          startupProbe:
+            tcpSocket:
+              port: mysql
+            periodSeconds: 5
+            failureThreshold: 30
+          # Readiness saja: liveness yang terlalu agresif bisa me-restart
+          # database saat sedang recovery. Tidak ada liveness di sini.
+          readinessProbe:
+            exec:
+              command:
+                - healthcheck.sh
+                - --connect
+                - --innodb_initialized
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: mariadb-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

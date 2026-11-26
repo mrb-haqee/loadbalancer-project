@@ -47,7 +47,7 @@ Batasan yang disepakati:
 Memilih **k3d 1 server + 2 agent**, dengan penegasan:
 
 - **Berdampingan, bukan menggantikan.** Compose tetap di port 80; Traefik k8s di
-  port 8080. Cluster memakai network k3d sendiri; MaxScale dijangkau lewat
+  port 18080. Cluster memakai network k3d sendiri; MaxScale dijangkau lewat
   `host.docker.internal:4006` (port host dibuka khusus untuk latihan ini).
   Percobaan menaruh cluster di `lb-net` ditinggalkan karena DNS fix k3d
   mengganti resolver node dan nama container Compose tidak resolve dari pod.
@@ -105,7 +105,7 @@ Catatan implementasi (lingkungan mesin ini):
 **Verifikasi (25 November 2026, cluster `lb-k8s`)**
 
 - 5 pod `Ready 1/1` di 3 node; `endpoints backend` berisi 5 IP pod.
-- Ingress `server.localhost:8080` mengembalikan 200 dari kelima pod (round robin
+- Ingress `server.localhost:18080` mengembalikan 200 dari kelima pod (round robin
   terlihat dari `servedBy`).
 - `make k8s-load`: 3001 request, 0 gagal, p95 ≈ 1,3 ms; HPA naik 5 → 10 pod.
 - MaxScale dimatikan: kelima pod `Running` tetapi `READY 0/1`, endpoint kosong,

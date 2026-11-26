@@ -1,0 +1,63 @@
+# Satu exporter untuk satu node MariaDB. Di Compose ada tiga exporter (satu per
+# node) supaya `mysql_up` bisa membedakan node mana yang mati; di fase 3 hanya
+# ada satu node, jadi satu exporter cukup.
+#
+# Dashboard database yang sama dengan Compose membaca job="mariadb" dan label
+# `node`, jadi label itu diisi di scrape config Prometheus.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysqld-exporter
+  labels:
+    app: mysqld-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysqld-exporter
+  template:
+    metadata:
+      labels:
+        app: mysqld-exporter
+    spec:
+      containers:
+        - name: exporter
+          image: prom/mysqld-exporter:v0.17.2
+          imagePullPolicy: IfNotPresent
+          env:
+            # v0.17 tidak lagi membaca DATA_SOURCE_NAME; pakai flag + env
+            # password sesuai dokumentasi exporter.
+            - name: MYSQLD_EXPORTER_PASSWORD
+              value: "lb_exporter_password"
+          args:
+            - --mysqld.address=mariadb:3306
+            - --mysqld.username=lb_exporter
+          ports:
+            - name: metrics
+              containerPort: 9104
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysqld-exporter
+  labels:
+    app: mysqld-exporter
+spec:
+  selector:
+    app: mysqld-exporter
+  ports:
+    - name: metrics
+      port: 9104
+      targetPort: metrics
