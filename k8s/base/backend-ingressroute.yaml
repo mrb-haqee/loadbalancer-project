@@ -38,6 +38,10 @@ metadata:
 spec:
   entryPoints:
     - web
+    - websecure
+  # Sertifikat dari cert-manager (k8s/tls/certificates.yaml).
+  tls:
+    secretName: backend-tls
   routes:
     - match: Host(`server.localhost`)
       kind: Rule

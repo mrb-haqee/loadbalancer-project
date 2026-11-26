@@ -1,0 +1,19 @@
+# Titik masuk GitOps. Satu kustomization yang menggabungkan seluruh jalur
+# Kubernetes: aplikasi (base + overlay), database, monitoring, TLS, dan Argo CD
+# sendiri. Argo CD menyinkronkan folder ini dari repo.
+#
+# File SQL dan dashboard tetap dibaca dari folder aslinya (db/init,
+# monitoring/grafana) lewat configMapGenerator, jadi build butuh
+# `--load-restrictor LoadRestrictionsNone`. Argo CD mendapat flag yang sama
+# lewat `spec.source.kustomize.buildOptions` di application.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../overlays/local
+  - ../db
+  - ../monitoring
+  - ../monitoring/traefik-metrics.yaml
+  - ../tls/clusterissuer.yaml
+  - ../tls/certificates.yaml
+  - argocd.yaml

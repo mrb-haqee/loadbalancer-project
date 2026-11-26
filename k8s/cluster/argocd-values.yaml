@@ -1,0 +1,24 @@
+# Argo CD untuk latihan GitOps. Nilai sengaja ramping.
+#
+# - dex dan notifications dimatikan: tidak dipakai di latihan ini dan tiap
+#   komponen menambah pod serta image. Chart 10.19 tidak lagi punya sakelar
+#   `applicationSet.enabled`, jadi controller itu tetap jalan (satu pod).
+# - server.insecure=true: TLS diputus di Traefik (sama seperti backend), jadi
+#   tidak ada dua lapis sertifikat self-signed.
+global:
+  domain: argocd.localhost
+
+configs:
+  params:
+    server.insecure: "true"
+  cm:
+    # Argo CD 3.x tidak lagi menerima buildOptions per Application, jadi flag
+    # ini global. Diperlukan karena configMapGenerator membaca file di luar
+    # root kustomization (db/init, monitoring/grafana).
+    kustomize.buildOptions: --load-restrictor LoadRestrictionsNone
+
+dex:
+  enabled: false
+
+notifications:
+  enabled: false

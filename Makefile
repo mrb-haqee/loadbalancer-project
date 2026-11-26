@@ -30,6 +30,17 @@ K8S_TRAEFIK_IMAGE   ?= traefik:v3.6.6
 # Image pihak ketiga yang sudah ada di Docker host. Di-import sekali supaya
 # tidak bergantung pada pull dari registry saat pod pertama kali jalan.
 K8S_IMAGES ?= traefik:v3.6.6 prom/prometheus:v3.16.0 grafana/grafana:13.3.1 mariadb:11.4 mariadb/maxscale:24.02.9 prom/mysqld-exporter:v0.17.2 grafana/k6:2.4.0
+# cert-manager: versi chart = versi image, jadi keduanya dipin bersama.
+K8S_CERT_MANAGER_VERSION ?= v1.18.2
+K8S_CERT_MANAGER_IMAGES ?= quay.io/jetstack/cert-manager-controller:$(K8S_CERT_MANAGER_VERSION) quay.io/jetstack/cert-manager-webhook:$(K8S_CERT_MANAGER_VERSION) quay.io/jetstack/cert-manager-cainjector:$(K8S_CERT_MANAGER_VERSION) quay.io/jetstack/cert-manager-acmesolver:$(K8S_CERT_MANAGER_VERSION) quay.io/jetstack/cert-manager-startupapicheck:$(K8S_CERT_MANAGER_VERSION)
+# Argo CD. Chart 10.19.1 memakai argocd v3.6.3; image-nya di-import seperti
+# komponen lain supaya tidak bergantung pada registry saat pod pertama jalan.
+K8S_ARGOCD_CHART   ?= 10.19.1
+K8S_ARGOCD_VERSION ?= v3.6.3
+K8S_ARGOCD_IMAGES  ?= quay.io/argoproj/argocd:$(K8S_ARGOCD_VERSION) ecr-public.aws.com/docker/library/redis:8.6.4-alpine
+# Semua kustomization di repo ini membaca file dari folder lain (SQL, dashboard),
+# jadi build memakai flag yang sama dengan Argo CD.
+K8S_KUSTOMIZE = kubectl --context $(K8S_CONTEXT) kustomize --load-restrictor LoadRestrictionsNone
 
 # Parameter uji CRUD acak; bisa dioverride dari command line, mis.
 # make crud-load COUNT=500 USERS=20 MODE=create KEEP=1
@@ -59,7 +70,7 @@ MAKEFLAGS += --no-print-directory
 	test test-backend test-docker test-db crud-load \
 	k6-install k6 k6-load k6-failover \
 	k8s-cluster k8s-import k8s-ingress k8s-image k8s-up k8s-down k8s-bootstrap \
-	k8s-status k8s-logs k8s-load k8s-smoke k8s-destroy k8s-monitoring k8s-monitoring-down k8s-db k8s-db-down
+	k8s-status k8s-logs k8s-load k8s-smoke k8s-destroy k8s-monitoring k8s-monitoring-down k8s-db k8s-db-down k8s-cert-manager k8s-tls k8s-argocd k8s-gitops
 
 help:
 	@echo Daftar target Makefile:
@@ -111,6 +122,10 @@ help:
 	@echo     make k8s-import        Impor image pihak ketiga dari Docker host
 	@echo     make k8s-db            MariaDB + MaxScale di dalam cluster
 	@echo     make k8s-monitoring    Prometheus + Grafana in-cluster
+	@echo     make k8s-cert-manager  cert-manager + CRD (sertifikat otomatis)
+	@echo     make k8s-tls           Issuer, Certificate, HTTPS di port 18443
+	@echo     make k8s-argocd        Argo CD (GitOps controller)
+	@echo     make k8s-gitops        Application yang menarik k8s/gitops dari repo
 	@echo     make k8s-status        Deployment, pod, Service, HPA, IngressRoute
 	@echo     make k8s-load          Jalankan k6 sebagai Job - memicu HPA
 	@echo     make k8s-logs          Log semua pod backend
@@ -305,11 +320,8 @@ k8s-down:
 # Monitoring in-cluster. ConfigMap Grafana dibuat dari folder monitoring/
 # (satu sumber dengan Compose), bukan disalin ke YAML.
 k8s-monitoring:
-	kubectl --context $(K8S_CONTEXT) create namespace $(K8S_MONITORING_NAMESPACE) --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
-	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) create configmap grafana-provisioning --from-file=prometheus.yml=monitoring/grafana/provisioning/datasources/prometheus.yml --from-file=lb.yml=monitoring/grafana/provisioning/dashboards/lb.yml --from-file=db.yml=monitoring/grafana/provisioning/dashboards/db.yml --from-file=k6.yml=monitoring/grafana/provisioning/dashboards/k6.yml --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
-	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) create configmap grafana-dashboards --from-file=lb-realtime.json=monitoring/grafana/dashboards/lb/lb-realtime.json --from-file=database.json=monitoring/grafana/dashboards/db/database.json --from-file=k6.json=monitoring/grafana/dashboards/k6/k6.json --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
 	kubectl --context $(K8S_CONTEXT) apply -f k8s/monitoring/traefik-metrics.yaml
-	kubectl --context $(K8S_CONTEXT) apply -k k8s/monitoring
+	$(K8S_KUSTOMIZE) k8s/monitoring | kubectl --context $(K8S_CONTEXT) apply -f -
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) rollout restart deploy/prometheus
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) rollout status deploy/prometheus deploy/grafana --timeout=180s
 
@@ -317,12 +329,47 @@ k8s-monitoring-down:
 	kubectl --context $(K8S_CONTEXT) delete -k k8s/monitoring --ignore-not-found
 	kubectl --context $(K8S_CONTEXT) delete -f k8s/monitoring/traefik-metrics.yaml --ignore-not-found
 
+# cert-manager: CRD + controller. Image di-import dulu karena registry bisa
+# menolak sebagian layer di mesin ini.
+k8s-cert-manager:
+	$(BUN) scripts/k8s-image.js $(K8S_CERT_MANAGER_IMAGES) --cluster $(K8S_CLUSTER)
+	helm repo add jetstack https://charts.jetstack.io --force-update
+	helm repo update jetstack
+	helm upgrade --install cert-manager jetstack/cert-manager --version $(K8S_CERT_MANAGER_VERSION) --namespace cert-manager --create-namespace --set crds.enabled=true --wait --timeout 5m
+
+# Issuer + Certificate, lalu IngressRoute dipasang ulang supaya TLS-nya aktif.
+# HTTPS: https://server.localhost:18443 (sertifikat self-signed).
+k8s-tls:
+	kubectl --context $(K8S_CONTEXT) apply -f k8s/tls/clusterissuer.yaml
+	kubectl --context $(K8S_CONTEXT) apply -f k8s/tls/certificates.yaml
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) wait --for=condition=Ready certificate/backend-tls --timeout=120s
+	kubectl --context $(K8S_CONTEXT) -n $(K8S_MONITORING_NAMESPACE) wait --for=condition=Ready certificate/monitoring-tls --timeout=120s
+	kubectl --context $(K8S_CONTEXT) apply -k k8s/overlays/local
+	$(K8S_KUSTOMIZE) k8s/monitoring | kubectl --context $(K8S_CONTEXT) apply -f -
+
+# Argo CD: satu Application menarik seluruh folder k8s/gitops dari repo, lalu
+# menyinkronkan sendiri setiap perubahan yang di-push.
+# UI: http://argocd.localhost:18080 (admin + password di Secret
+# argocd-initial-admin-secret).
+k8s-argocd:
+	$(BUN) scripts/k8s-image.js $(K8S_ARGOCD_IMAGES) --cluster $(K8S_CLUSTER)
+	helm repo add argo https://argoproj.github.io/argo-helm --force-update
+	helm repo update argo
+	helm upgrade --install argocd argo/argo-cd --version $(K8S_ARGOCD_CHART) --namespace argocd --create-namespace --values k8s/cluster/argocd-values.yaml --wait --timeout 10m
+	kubectl --context $(K8S_CONTEXT) wait --for=condition=Established crd/applications.argoproj.io --timeout=120s
+
+# Pasang manifest GitOps sekali dari mesin ini, lalu Application `lb-demo` yang
+# mengambil alih. Butuh repo sudah di-push: Argo membaca dari GitHub, bukan dari
+# working tree lokal.
+k8s-gitops:
+	$(K8S_KUSTOMIZE) k8s/gitops | kubectl --context $(K8S_CONTEXT) apply -f -
+	kubectl --context $(K8S_CONTEXT) apply -f k8s/gitops/application.yaml
+	kubectl --context $(K8S_CONTEXT) -n argocd rollout status deploy/argocd-server --timeout=180s
+
 # Database in-cluster. ConfigMap init dibuat dari SQL yang juga dipakai Compose
 # (001-schema.sql), ditambah user khas Kubernetes (002-users.sql).
 k8s-db:
-	kubectl --context $(K8S_CONTEXT) create namespace $(K8S_NAMESPACE) --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
-	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) create configmap mariadb-init --from-file=001-schema.sql=db/init/001-schema.sql --from-file=002-users.sql=k8s/db/002-users.sql --dry-run=client -o yaml | kubectl --context $(K8S_CONTEXT) apply -f -
-	kubectl --context $(K8S_CONTEXT) apply -k k8s/db
+	$(K8S_KUSTOMIZE) k8s/db | kubectl --context $(K8S_CONTEXT) apply -f -
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) rollout status statefulset/mariadb --timeout=240s
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) rollout status deploy/maxscale deploy/mysqld-exporter --timeout=180s
 
@@ -331,7 +378,7 @@ k8s-db:
 k8s-db-down:
 	kubectl --context $(K8S_CONTEXT) delete -k k8s/db --ignore-not-found
 
-k8s-bootstrap: k8s-cluster k8s-import k8s-ingress k8s-image k8s-db k8s-up k8s-monitoring
+k8s-bootstrap: k8s-cluster k8s-import k8s-ingress k8s-image k8s-db k8s-up k8s-monitoring k8s-cert-manager k8s-tls k8s-argocd k8s-gitops k8s-argocd k8s-gitops
 
 k8s-status:
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) get deploy,statefulset,pods,svc,hpa,ingressroutes

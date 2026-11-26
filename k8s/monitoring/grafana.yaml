@@ -132,6 +132,9 @@ metadata:
 spec:
   entryPoints:
     - web
+    - websecure
+  tls:
+    secretName: monitoring-tls
   routes:
     - match: Host(`grafana.localhost`)
       kind: Rule
@@ -148,6 +151,9 @@ metadata:
 spec:
   entryPoints:
     - web
+    - websecure
+  tls:
+    secretName: monitoring-tls
   routes:
     - match: Host(`prometheus.localhost`)
       kind: Rule

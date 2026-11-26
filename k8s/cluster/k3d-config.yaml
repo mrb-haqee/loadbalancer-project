@@ -1,8 +1,8 @@
 # Cluster belajar: 1 server + 2 agent di dalam Docker (k3d).
 #
 # Cluster memakai network bawaan k3d (bukan `lb-net`), supaya tidak bercampur
-# dengan jaringan Compose. Database dijangkau lewat `host.docker.internal:4006`
-# — port MaxScale dibuka di host khusus untuk jalur belajar ini.
+# dengan jaringan Compose. Database fase 3 berjalan di dalam cluster sendiri
+# (MariaDB + MaxScale), jadi tidak ada port database yang dibuka ke host.
 #
 # Port host 18080/18443 dipakai, bukan 80/443, supaya stack Compose (Traefik :80)
 # tetap bisa hidup berdampingan. URL k8s: http://server.localhost:18080

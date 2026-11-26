@@ -83,7 +83,18 @@ if (nodes.length === 0) {
 const workDir = mkdtempSync(join(tmpdir(), 'k3d-image-'));
 const tarball = join(workDir, 'image.tar');
 
+/** Tarik image kalau belum ada di Docker host. */
+function ensureImage(image) {
+  const present = spawnSync('docker', ['image', 'inspect', image], { stdio: 'ignore' });
+  if (present.status !== 0) {
+    console.log(`Menarik ${image}...`);
+    run('docker', ['pull', image]);
+  }
+}
+
 try {
+  images.forEach(ensureImage);
+
   console.log(`Menyimpan ${images.length} image ke tar...`);
   run('docker', ['save', ...images, '-o', tarball]);
 

@@ -1,0 +1,31 @@
+# Application tunggal untuk seluruh jalur Kubernetes. Dibuat manual sekali
+# (`make k8s-gitops`), sesudah itu Argo CD yang menarik perubahan dari repo.
+#
+# `ignoreDifferences` pada spec.replicas wajib: HPA menulis jumlah replika, jadi
+# tanpa ini Argo akan terus melaporkan OutOfSync dan menimpa keputusan HPA.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lb-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mrb-haqee/loadbalancer-project.git
+    targetRevision: main
+    path: k8s/gitops
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

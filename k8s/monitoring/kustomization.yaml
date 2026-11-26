@@ -14,6 +14,25 @@ resources:
   - prometheus.yaml
   - grafana.yaml
 
+# Dashboard dan provisioning tetap satu sumber dengan Compose: folder
+# `monitoring/grafana/`. Tidak disalin ke YAML, jadi build perlu
+# `--load-restrictor LoadRestrictionsNone` (lihat Makefile).
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: grafana-provisioning
+    files:
+      - prometheus.yml=../../monitoring/grafana/provisioning/datasources/prometheus.yml
+      - lb.yml=../../monitoring/grafana/provisioning/dashboards/lb.yml
+      - db.yml=../../monitoring/grafana/provisioning/dashboards/db.yml
+      - k6.yml=../../monitoring/grafana/provisioning/dashboards/k6.yml
+  - name: grafana-dashboards
+    files:
+      - lb-realtime.json=../../monitoring/grafana/dashboards/lb/lb-realtime.json
+      - database.json=../../monitoring/grafana/dashboards/db/database.json
+      - k6.json=../../monitoring/grafana/dashboards/k6/k6.json
+
 # traefik-metrics.yaml sengaja tidak masuk daftar ini: ia harus berada di
 # namespace traefik, sedangkan kustomization ini memaksa namespace monitoring.
-# Makefile menerapkannya terpisah.
+# k8s/gitops/kustomization.yaml yang menggabungkannya.

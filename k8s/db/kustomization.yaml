@@ -4,8 +4,11 @@
 # tersentuh. Yang berubah hanya backend Kubernetes: DB_HOST sekarang menunjuk
 # Service `maxscale` di namespace ini, bukan host.docker.internal.
 #
-# ConfigMap `mariadb-init` dibuat `make k8s-db` dari:
+# ConfigMap `mariadb-init` dibuat dari sumber yang sama dengan Compose:
 #   db/init/001-schema.sql + k8s/db/002-users.sql
+# File SQL sengaja tidak disalin ke folder ini. Konsekuensinya build harus
+# memakai `--load-restrictor LoadRestrictionsNone` (lihat Makefile dan
+# k8s/gitops/application.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -15,3 +18,13 @@ resources:
   - mariadb.yaml
   - maxscale.yaml
   - exporter.yaml
+
+generatorOptions:
+  # Nama harus tetap `mariadb-init`; volume di mariadb.yaml menyebut nama itu.
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: mariadb-init
+    files:
+      - 001-schema.sql=../../db/init/001-schema.sql
+      - 002-users.sql=002-users.sql
