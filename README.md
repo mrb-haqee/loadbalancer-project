@@ -17,7 +17,7 @@ Empat project compose terpisah, semuanya berbagi network `lb-net`:
 
 Traefik tidak "memiliki" backend maupun dashboard monitoring: apa pun yang diberi label dan menempel di `lb-net` otomatis dapat URL. Grafana dan web dashboard k6 karena itu bisa dibuka lewat `grafana.localhost` dan `k6.localhost`, bukan hanya lewat port. MariaDB dan exporter-nya tetap tanpa rute Traefik: yang dibuka hanya dashboard-nya.
 
-> **Jalur belajar Kubernetes (opsional).** Selain Compose, ada jalur kedua di [`k8s/`](k8s/) untuk mempelajari orkestrasi dengan beban kerja yang sama: k3d 1 server + 2 agent, Traefik `IngressRoute`, 5 replika dalam satu `Deployment`, readiness/liveness probe, rolling update, HPA, dan k6 sebagai `Job`. Jalur ini **tidak menggantikan** Compose dan berjalan di port **8080**. Mulai dari [`docs/kubernetes.md`](docs/kubernetes.md); alasan dan trade-off-nya di [`docs/adr/0016-kubernetes-learning-track.md`](docs/adr/0016-kubernetes-learning-track.md).
+> **Jalur belajar Kubernetes (opsional).** Selain Compose, ada jalur kedua di [`k8s/`](k8s/) untuk mempelajari orkestrasi dengan beban kerja yang sama: k3d 1 server + 2 agent, Traefik `IngressRoute`, 5 replika dalam satu `Deployment`, readiness/liveness probe, rolling update, HPA, k6 sebagai `Job`, database stateful (MariaDB + MaxScale), monitoring in-cluster, TLS via cert-manager, SealedSecrets, dan GitOps dengan Argo CD. Jalur ini **tidak menggantikan** Compose dan berjalan di port **18080/18443**. Mulai dari [`docs/kubernetes.md`](docs/kubernetes.md); alasan dan trade-off-nya di [`docs/adr/0016-kubernetes-learning-track.md`](docs/adr/0016-kubernetes-learning-track.md).
 
 > Sebelumnya ada varian load balancer yang ditulis sendiri di Node.js. Varian itu **sudah dihapus** dari project ini karena yang dipakai hanya versi container. Catatan sejarahnya tetap ada di [`docs/adr/`](docs/adr/).
 
@@ -192,24 +192,26 @@ Buka **http://server.localhost/ui** untuk CRUD katalog. Panduan database, skema,
 
 ### Jalur Kubernetes (belajar orkestrasi)
 
-Butuh **k3d** dan **Helm** (lihat [`docs/kubernetes.md`](docs/kubernetes.md) bagian prasyarat). Database tetap di Compose:
+Butuh **k3d** dan **Helm** (lihat [`docs/kubernetes.md`](docs/kubernetes.md) bagian prasyarat). Database juga ikut jalan di dalam cluster (MariaDB + MaxScale), jadi `k8s-bootstrap` cukup:
 
 ```powershell
-make db-up            # MaxScale harus hidup: readiness pod mengecek database
-make k8s-bootstrap    # cluster k3d + Traefik + image + manifest
+make k8s-bootstrap    # cluster + image + database + aplikasi + monitoring + TLS + Argo CD
 make k8s-status
-make k8s-smoke        # GET http://server.localhost:18080 lewat ingress
+make k8s-smoke        # GET https://server.localhost:18443 lewat ingress
 make k8s-load         # k6 sebagai Job - memicu HPA
 make k8s-destroy      # hapus cluster k3d; Compose tidak tersentuh
 ```
 
 | URL | Arti |
 |---|---|
-| `http://server.localhost:18080/` | Load balancing ke 5 pod backend |
-| `http://server.localhost:18080/ui` | UI katalog (butuh database) |
-| `http://traefik.localhost:18080/dashboard/` | Dashboard Traefik versi Kubernetes |
+| `https://server.localhost:18443/` | Load balancing ke 5 pod backend |
+| `https://server.localhost:18443/ui` | UI katalog |
+| `https://grafana.localhost:18443/` | Grafana (admin/admin) |
+| `https://prometheus.localhost:18443/` | Prometheus |
+| `https://argocd.localhost:18443/` | Argo CD (GitOps) |
+| `https://traefik.localhost:18443/dashboard/` | Dashboard Traefik versi Kubernetes |
 
-port 18080 dipakai supaya Traefik Compose tetap memegang port 80; kedua jalur bisa dibandingkan berdampingan. Panduan lengkap, latihan, dan troubleshooting ada di [`docs/kubernetes.md`](docs/kubernetes.md).
+Sertifikatnya self-signed, jadi browser memperingatkan. Port 18080/18443 dipakai supaya Traefik Compose tetap memegang port 80; HTTP dialihkan ke HTTPS. Panduan lengkap, latihan, dan troubleshooting ada di [`docs/kubernetes.md`](docs/kubernetes.md).
 
 Respons backend menyebut identitas dirinya:
 

@@ -21,7 +21,7 @@ Batasan yang disepakati:
 1. Stack Compose tetap utuh dan tetap menjadi cara utama menjalankan demo.
 2. Jalur Kubernetes harus bisa hidup berdampingan (port dan network terpisah).
 3. Fokus pada pemahaman konsep, bukan parity fitur.
-4. Database tetap di Compose pada fase pertama.
+4. Database tetap di Compose pada fase 1; pindah ke dalam cluster pada fase 3.
 
 ## Pilihan yang dipertimbangkan
 
@@ -47,8 +47,8 @@ Batasan yang disepakati:
 Memilih **k3d 1 server + 2 agent**, dengan penegasan:
 
 - **Berdampingan, bukan menggantikan.** Compose tetap di port 80; Traefik k8s di
-  port 18080. Cluster memakai network k3d sendiri; MaxScale dijangkau lewat
-  `host.docker.internal:4006` (port host dibuka khusus untuk latihan ini).
+  port 18080/18443 (8080 dipakai container lain di mesin ini). Cluster memakai
+  network k3d sendiri, terpisah dari `lb-net`.
   Percobaan menaruh cluster di `lb-net` ditinggalkan karena DNS fix k3d
   mengganti resolver node dan nama container Compose tidak resolve dari pod.
 - **Traefik bawaan k3s dimatikan.** Ingress dipasang sendiri lewat chart resmi
@@ -62,10 +62,28 @@ Memilih **k3d 1 server + 2 agent**, dengan penegasan:
   Endpoint `/ready` ditambahkan ke backend dan diuji tanpa database.
 - **HPA 5–10 pod pada 70% CPU** dengan metrics-server bawaan k3s, agar latihan
   scaling memakai beban k6 yang sudah ada.
-- **Database tetap di Compose pada fase 1.** StatefulSet MariaDB + MaxScale
-  adalah fase 3, karena masalahnya bukan orkestrasi stateless lagi.
+- **Database dipindah ke dalam cluster pada fase 3.** MariaDB sebagai
+  StatefulSet + PVC, MaxScale sebagai Deployment di depannya. Tidak ada lagi
+  port database yang dibuka ke host.
 - **k6 dijalankan sebagai Job**, bukan container long-running, untuk
   memperlihatkan model kerja "sekali jalan lalu selesai".
+- **Fase 2: PDB + kuota.** `PodDisruptionBudget minAvailable: 3` dan
+  ResourceQuota/LimitRange dipakai untuk memperlihatkan availability dan
+  pembatasan. NetworkPolicy tidak ditulis karena flannel bawaan k3s tidak
+  menegakkannya (butuh Calico/Cilium).
+- **Fase 2: monitoring tanpa operator.** Prometheus memakai `kubernetes_sd_config`
+  role pod dan RBAC, bukan ServiceMonitor. Grafana membaca provisioning dan
+  dashboard dari folder `monitoring/grafana` yang sama dengan Compose.
+- **Fase 4: TLS via cert-manager self-signed.** Nama host `.localhost` tidak
+  bisa diverifikasi ACME, jadi ClusterIssuer self-signed. Semua IngressRoute
+  yang punya `tls` hanya memakai entrypoint `websecure`; HTTP dialihkan oleh
+  router `HostRegexp` + middleware `redirectScheme` (port 18443).
+- **Fase 4: SealedSecrets.** `backend-secret.yaml` diganti SealedSecret supaya
+  password demo tetap terenkripsi di repo.
+- **Fase 4: GitOps dengan Argo CD.** Satu Application `lb-demo` menyinkronkan
+  folder `k8s/gitops` (gabungan aplikasi, database, monitoring, TLS, dan UI
+  Argo CD). `ignoreDifferences` pada `spec.replicas` mencegah Argo bertabrakan
+  dengan HPA. SQL dan dashboard tetap satu sumber lewat `configMapGenerator`.
 
 Catatan implementasi (lingkungan mesin ini):
 
@@ -73,10 +91,14 @@ Catatan implementasi (lingkungan mesin ini):
   dipakai Docker Desktop di mesin ini. Pin ini murni kompatibilitas, bukan
   pilihan arsitektur.
 - **Image masuk lewat `scripts/k8s-image.js`** (`docker save` → `docker cp` →
-  `ctr images import`) karena `k3d image import` gagal di setup ini.
+  `ctr images import`) karena `k3d image import` gagal di setup ini. Skrip
+  menarik image ke Docker host lebih dulu kalau belum ada.
 - **Traefik chart 39.0.7 + image v3.6.6**, bukan chart 43/Traefik 3.8: satu layer
   image 3.8 gagal diunduh dari Docker Hub (`tls: bad record MAC`). Versi 3.6.6
   sama dengan yang dipakai Compose, jadi perilakunya bisa dibandingkan.
+- **cert-manager v1.18.2 dan Argo CD chart 10.19.1** dipin dengan alasan yang
+  sama (image tersedia lokal). Argo CD 3.x memindahkan opsi build Kustomize dari
+  per-Application ke `configs.cm."kustomize.buildOptions"`.
 - **kubeconfig memakai `127.0.0.1`**, bukan `host.docker.internal`, karena nama
   itu bisa resolve ke IP LAN dan tidak menjawab dari host.
 
@@ -99,19 +121,44 @@ Catatan implementasi (lingkungan mesin ini):
 - Image harus di-import manual setiap kali berubah; belum ada registry lokal.
 - Readiness yang bergantung pada DB membuat endpoint non-DB ikut tidak
   dilayani saat database mati. Ini trade-off latihan, bukan keputusan produksi.
-- Belum ada monitoring in-cluster, TLS, PDB, NetworkPolicy, atau GitOps; semua
-  itu sengaja ditunda ke fase berikutnya.
+- `mariadb-0` butuh limit memori 1Gi; dengan 512Mi container `OOMKilled` karena
+  page cache PVC ikut dihitung cgroup.
+- Traefik, cert-manager, dan Argo CD sendiri dipasang Helm sekali, di luar
+  `k8s/gitops`. Jadi belum sepenuhnya GitOps; hanya beban kerja yang dikelola
+  Argo.
+- Belum ada ServiceMonitor, Loki/Alloy, NetworkPolicy, atau operator MariaDB;
+  semua itu sengaja dilewati (lihat `docs/kubernetes.md` bagian status fase).
 
-**Verifikasi (25 November 2026, cluster `lb-k8s`)**
+**Verifikasi (26 November 2026, cluster `lb-k8s`)**
+
+Fase 1 (25 November):
 
 - 5 pod `Ready 1/1` di 3 node; `endpoints backend` berisi 5 IP pod.
-- Ingress `server.localhost:18080` mengembalikan 200 dari kelima pod (round robin
-  terlihat dari `servedBy`).
+- Ingress mengembalikan 200 dari kelima pod (round robin terlihat dari `servedBy`).
 - `make k8s-load`: 3001 request, 0 gagal, p95 ≈ 1,3 ms; HPA naik 5 → 10 pod.
 - MaxScale dimatikan: kelima pod `Running` tetapi `READY 0/1`, endpoint kosong,
   ingress 503, `restartCount` tetap 0. Setelah MaxScale hidup lagi, semuanya
   pulih tanpa intervensi.
 - `make k8s-image` (build + impor + rolling restart) selesai tanpa downtime.
+
+Fase 2–4:
+
+- `kubectl drain` pada satu node berhasil karena `PodDisruptionBudget`
+  `minAvailable: 3`; LimitRange + ResourceQuota menolak pod tanpa resource.
+- Prometheus in-cluster melaporkan 6 target `up`; tiga dashboard (LB, MariaDB,
+  k6) termuat di Grafana lewat provisioning.
+- MariaDB `mariadb-0` `Ready 1/1` di atas PVC 1Gi; backend melaporkan
+  `lb_app@maxscale:4006/lb_demo`; `mysql_up=1`; CRUD `/api/servers` jalan;
+  k6 3001 request tanpa gagal.
+- Certificate `backend-tls` dan `monitoring-tls` `Ready`; HTTPS di port 18443
+  mengembalikan 200 untuk backend, Grafana, Prometheus, dan Argo CD; HTTP
+  dialihkan 301 ke `https://<host>:18443`.
+- Menghapus Secret `backend-secret` memicu controller SealedSecrets membuat
+  ulang dari SealedSecret.
+- Argo CD `Application lb-demo` berstatus `Synced` + `Healthy`. Menaikkan
+  replika Deployment secara manual **tidak** dilawan Argo (HPA yang
+  mengembalikannya), membuktikan `ignoreDifferences` bekerja; perubahan di git
+  yang di-push ditarik Argo pada refresh berikutnya.
 
 **Kapan keputusan ini ditinjau ulang**
 

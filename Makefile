@@ -129,7 +129,7 @@ help:
 	@echo     make k8s-status        Deployment, pod, Service, HPA, IngressRoute
 	@echo     make k8s-load          Jalankan k6 sebagai Job - memicu HPA
 	@echo     make k8s-logs          Log semua pod backend
-	@echo     make k8s-smoke         GET http://server.localhost:18080 lewat ingress
+	@echo     make k8s-smoke         GET https://server.localhost:18443 lewat ingress
 	@echo     make k8s-down          Hapus resource Kubernetes - cluster tetap
 	@echo     make k8s-destroy       Hapus cluster k3d seluruhnya
 
@@ -397,7 +397,7 @@ k8s-load:
 	kubectl --context $(K8S_CONTEXT) -n $(K8S_NAMESPACE) logs job/k6-load
 
 k8s-smoke:
-	curl -s -H "Host: server.localhost" http://127.0.0.1:18080/
+	curl -sk --resolve server.localhost:18443:127.0.0.1 https://server.localhost:18443/
 
 k8s-destroy:
 	k3d cluster delete $(K8S_CLUSTER)
